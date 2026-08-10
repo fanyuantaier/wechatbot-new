@@ -1,8 +1,0 @@
-Initial release: WeChatBot_WXAUTO_SE 2.2.0（基于 KouriChat 修改的智能微信聊天机器人）
-
-- 通过 wechatauto-replica（wxauto 复刻版）收发微信消息，兼容微信 4.1.12+，无需 wxautox4_wechatbot
-- 调用 deepseek/gpt/gemini 等大语言模型生成回复
-- 支持：多用户/群聊独立 Prompt、图片与表情包识别、情绪识别并回复表情包、网页链接内容获取、AI 时间感知、主动发送与合并处理、WebUI 配置编辑、记忆功能、定时任务（含语音通话提醒）、联网搜索、语音消息转文字、自动更新、角色论坛、指令功能
-- 基于 KouriChat 修改（原项目版权 umaru 2025，iwyxdxl 2025 修改创建），fanyuantaier 兼容性重构（UIA 路线在新版微信失效，改用 wechatauto-replica）
-- 遵循 GPL-3.0 或更高版本许可
-- 发布到 PyPI 与 GitHub，提供 wechatbot / wechatbot-webui 命令入口
