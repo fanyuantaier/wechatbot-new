@@ -1,0 +1,68 @@
+第三方依赖许可证信息 / Third-Party Dependencies License Information
+================================================================
+
+本文件列出了WeChatBot_WXAUTO_SE项目使用的所有第三方依赖及其许可证信息。
+除特殊说明外，所有列出的许可证均与GPL-3.0兼容。
+
+⚠️ 特殊依赖说明 / Special Dependencies Notice:
+===========================================
+
+微信自动化核心库 (必需依赖):
+- wechatauto-replica: Apache License 2.0（本项目微信自动化核心库，
+  导入名为 wechatauto；复刻自 wxauto，已发布到 PyPI）
+  安装：pip install "wechatauto-replica[guia]>=1.0.4"
+
+重要说明：wxbot.py / bot.py 直接依赖 wechatauto（含 guia 扩展）完成
+微信 4.x 的消息读取与发送，其传递依赖（uiautomation / pywin32 /
+pyperclip / Pillow / psutil / colorama / cryptography / winsdk /
+pypinyin）已由 wechatauto-replica 自动带入，不再在 requirements.txt
+中重复声明。
+
+主要依赖 / Main Dependencies:
+-----------------------------
+
+1. wechatauto-replica (Apache License 2.0)
+   - 许可证：Apache License 2.0 (GPL-3.0兼容)
+   - 用途：微信 4.x 自动化核心库（消息读取 / 坐标+OCR 发送）
+
+2. Flask (BSD License)
+   - 许可证：BSD 3-Clause License (GPL-3.0兼容)
+   - 用途：Web UI框架
+
+3. OpenAI (Apache License 2.0)
+   - 许可证：Apache License 2.0 (GPL-3.0兼容)
+   - 用途：AI模型接口
+
+4. Requests (Apache License 2.0)
+   - 许可证：Apache License 2.0 (GPL-3.0兼容)
+   - 用途：HTTP请求库
+
+5. BeautifulSoup4 (MIT License)
+   - 许可证：MIT License (GPL-3.0兼容)
+   - 用途：HTML解析
+
+6. psutil (BSD License)
+   - 许可证：BSD 3-Clause License (GPL-3.0兼容)
+   - 用途：系统进程监控
+
+其他依赖 / Other Dependencies:
+-----------------------------
+- lxml: BSD License (GPL-3.0兼容)（BeautifulSoup 解析器）
+- werkzeug: BSD License (GPL-3.0兼容)
+- filelock: Unlicense (GPL-3.0兼容)
+
+（Pillow / PyAutoGUI / comtypes / pywin32 / pyperclip / typing-extensions
+等已不再直接使用：Pillow 等由 wechatauto-replica 传递依赖提供，PyAutoGUI
+等为死依赖，均已从依赖清单移除。）
+
+许可证兼容性说明 / License Compatibility Notes:
+=============================================
+- 所有列出的依赖库许可证均与GPL-3.0兼容
+- BSD、MIT、Apache 2.0许可证都是允许性许可证，可以与GPL-3.0组合使用
+- 本项目作为整体遵循GPL-3.0许可证
+- 用户在重新分发时需要遵循GPL-3.0的所有条款
+
+更新日期：2025年9月
+维护者：iwyxdxl
+
+注意：本文件应在依赖更新时同步更新，以确保许可证信息的准确性。

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+.smoke-venv/
+
+# 离线依赖缓存（第三方 wheel，不纳入版本控制）
+libs/
+
+# 运行时生成的数据
+chat_contexts.json
+user_timers.json
+core_memory/
+memory_temp/
+forum_data/npc_config.json
+
+# 日志
+*.log

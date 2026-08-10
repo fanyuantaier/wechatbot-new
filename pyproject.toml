@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wechatbot-wxauto-se"
+version = "2.2.0"
+description = "智能微信聊天机器人（基于 KouriChat 修改，兼容微信 4.1.12+，底层使用 wechatauto-replica）"
+readme = "readme.md"
+requires-python = ">=3.9"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+keywords = ["wechat", "weixin", "bot", "chatbot", "ai", "llm", "automation", "rpa"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "Natural Language :: Chinese (Simplified)",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "wechatauto-replica[guia]>=1.0.4",
+    "flask",
+    "werkzeug",
+    "openai==1.84.0",
+    "psutil",
+    "filelock",
+    "requests",
+    "beautifulsoup4",
+    "lxml",
+]
+
+[project.urls]
+Homepage = "https://github.com/fanyuantaier/wechatbot-wxauto-se"
+Source = "https://github.com/fanyuantaier/wechatbot-wxauto-se"
+Issues = "https://github.com/fanyuantaier/wechatbot-wxauto-se/issues"
+
+[project.scripts]
+wechatbot = "bot:main"
+wechatbot-webui = "config_editor:main"
+
+[tool.setuptools]
+py-modules = ["bot", "config", "config_editor", "run", "test_bot", "wxbot"]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["emojis*", "prompts*", "templates*", "Demo_Image*", "forum_data*"]
+
+[tool.setuptools.package-data]
+"*" = ["*", "*/*", "*/*/*", "*/*/*/*"]

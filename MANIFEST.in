@@ -1,0 +1,11 @@
+recursive-include emojis *
+recursive-include prompts *
+recursive-include templates *
+recursive-include Demo_Image *
+recursive-include forum_data *
+include LICENSE
+include readme.md
+include CHANGELOG.md
+include requirements.txt
+include DEPENDENCIES.txt
+include LICENSE_COMPLIANCE.md
