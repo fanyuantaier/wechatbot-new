@@ -22,6 +22,7 @@
 <img src="Demo_Image/5.png" alt="绀轰緥鍥剧墖4" width="900px">
 
 # 鐗堟湰鍙�
+- v2.2.1（2026-08-11：readme 转 UTF-8 + 徽章，PyPI 元数据 SEO 优化）
 - v2.2.0
 
 # 鐩�鍓嶆敮鎸佺殑鍔熻兘
