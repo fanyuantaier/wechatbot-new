@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wechatbot-new"
-version = "2.2.1"
-description = "智能微信聊天机器人（基于 KouriChat 重构）：接入 DeepSeek/GPT/Gemini 大模型，拟人化角色扮演、记忆、情绪表情包、定时任务、联网搜索；兼容微信 4.1.12+，底座 wechatauto-replica"
+version = "2.2.2"
+description = "智能微信聊天机器人（基于 KouriChat 重构）：接入 DeepSeek/GPT/Gemini 大模型，拟人化角色扮演、记忆、情绪表情包、定时任务、联网搜索；兼容微信 4.1.12+，底层使用 wechatauto-replica"
 readme = "readme.md"
 requires-python = ">=3.9"
 license = "GPL-3.0-or-later"
