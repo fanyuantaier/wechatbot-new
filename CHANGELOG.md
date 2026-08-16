@@ -7,6 +7,10 @@
 - 由于修改范围广泛且深入，无法精确标注每处修改的具体日期
 - 所有修改均在2026年期间完成，遵循GPL-3.0许可证
 
+# v2.2.3 (2026年08月16日)
+- 兼容层接上 wechatauto 新能力：拍一拍（WxMessage.tickle）、撤回消息（select_option('撤回')）、语音通话（WeChat.VoiceCall）——UIA 热激活 + OCR，委托 wechatauto 1.1.x 的 Chat.Poke / Chat.RecallLastMessage / Chat.VoiceCall
+- 语音通话不再降级跳过（原返回 False），现在真正发起（需 UIA 驱动可用）
+
 # v2.1.6 (2026年01月16日)
 - 现已支持 WeChatBot 4.1.6.46 版
 - 删除一些不必要的代码

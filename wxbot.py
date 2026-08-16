@@ -14,8 +14,10 @@ wxbot —— 兼容层
 差异说明：
   * 消息接收走本地数据库轮询（每秒一次），延迟约 1~2 秒。
   * 发送走坐标/OCR（打开会话 -> 输入 -> 回车），比旧版稍慢。
-  * 语音转文字、合并转发解析、发起语音通话在兼容层不支持，
-    会安全降级（返回空值/记录日志），不影响其它功能。
+  * 语音转文字、合并转发解析在兼容层不支持，会安全降级
+    （返回空值/记录日志），不影响其它功能。
+  * 拍一拍/撤回/语音通话已接上 wechatauto（UIA 热激活 + OCR），
+    分别对应 WxMessage.tickle() / select_option('撤回') / WeChat.VoiceCall()。
 """
 
 import glob
@@ -281,6 +283,42 @@ class WxMessage:
             log.warning("表情截图失败: %s", e)
             return None
 
+    def tickle(self, who: str = None) -> bool:
+        """对消息所在会话的对方发起「拍一拍」。
+
+        委托 wechatauto 的 Chat.Poke（右键对方头像 + OCR 菜单）。返回
+        是否成功。不指定 who 时拍当前会话对象。
+        """
+        try:
+            chat = self._chat
+            if chat is None:
+                log.warning("拍一拍失败: 无会话对象")
+                return False
+            resp = chat.Poke(who or getattr(chat, "who", None))
+            return bool(resp and resp.get("status") in ("成功",))
+        except Exception as e:
+            log.warning("拍一拍失败: %s", e)
+            return False
+
+    def select_option(self, option: str, **kwargs) -> bool:
+        """对消息所在会话执行菜单操作（当前支持「撤回」）。
+
+        委托 wechatauto 的 Chat.RecallLastMessage。返回是否成功。
+        """
+        if option not in ("撤回", "recall"):
+            log.info("select_option(%s) 暂不支持，已忽略", option)
+            return False
+        try:
+            chat = self._chat
+            if chat is None:
+                log.warning("撤回失败: 无会话对象")
+                return False
+            resp = chat.RecallLastMessage(getattr(chat, "who", None))
+            return bool(resp and resp.get("status") in ("成功",))
+        except Exception as e:
+            log.warning("撤回失败: %s", e)
+            return False
+
     def __str__(self):
         return "<WxMessage %s from %s: %s>" % (self.type, self.sender, self.content[:50])
 
@@ -416,8 +454,17 @@ class WeChat(_BaseWeChat):
             log.warning("GetAllSubWindow 失败: %s", e)
         return subs
 
-    # ------------------------------------------------------------ 不支持项
+    # ------------------------------------------------------------ 通话/撤回
 
     def VoiceCall(self, user_id=None, **kwargs):
-        wxlog.info("VoiceCall 在 wechatauto 兼容层不支持，已跳过 (user=%s)", user_id)
-        return False
+        """发起语音通话（委托 wechatauto 的 Chat.VoiceCall）。
+
+        需 UIA 驱动可用（热激活后生效）；失败时返回 False 由调用方降级。
+        """
+        try:
+            chat = _BaseChat(user_id, self._gui, self._db)
+            resp = chat.VoiceCall(video=bool(kwargs.get("video", False)))
+            return bool(resp and resp.get("status") in ("成功",))
+        except Exception as e:
+            wxlog.warning("VoiceCall 失败 (%s): %s", user_id, e)
+            return False
