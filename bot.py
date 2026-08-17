@@ -552,7 +552,14 @@ def get_chat_type_info(user_name):
         bool: True表示群聊，False表示私聊，None表示未找到或出错
     """
     try:
-        # 获取所有聊天窗口
+        # 优先使用已注册的监听对象判断类型（O(1)），避免全量扫描会话
+        registered_type = wx.GetListenChatType(user_name)
+        if registered_type in ("group", "friend"):
+            is_group = (registered_type == "group")
+            logger.info(f"用户 '{user_name}' 的聊天类型(监听缓存): {registered_type} ({'群聊' if is_group else '私聊'})")
+            return is_group
+
+        # 监听对象不存在时，回退到全量扫描
         chats = wx.GetAllSubWindow()
         for chat in chats:
             chat_info = chat.ChatInfo()

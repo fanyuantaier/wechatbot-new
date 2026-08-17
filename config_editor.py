@@ -3719,7 +3719,7 @@ def kill_process_using_port(port):
                 except Exception as e:
                     print(f"结束进程 {conn.pid} 时出现异常：{e}")
 
-def main():
+if __name__ == '__main__':
     # 配置应用日志级别
     app.logger.setLevel(logging.INFO)
     
@@ -3767,7 +3767,7 @@ def main():
 
     print("\033[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m")
     print("\033[32m✅ 配置编辑器启动成功！\033[0m")
-    print("\033[32m✅ 当前版本为：version：2.1.6\033[0m")
+    print("\033[32m✅ 当前版本为：version：2.2.4\033[0m")
     print("\033[32m⚠️ 请注意PC端微信\033[0m")
     print("\033[32m🈲 禁止登录新注册小号，极大几率封号\033[0m")
     print("\033[32m☣️ 买来你就被骗了，倒卖死全家喔\033[0m")
@@ -3799,6 +3799,3 @@ def main():
     #host = "0.0.0.0" if config.get('ENABLE_LOGIN_PASSWORD', False) else "127.0.0.1"
     app.run(host= "127.0.0.1", debug=False, port=PORT)
     
-
-if __name__ == '__main__':
-    main()

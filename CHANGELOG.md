@@ -7,6 +7,11 @@
 - 由于修改范围广泛且深入，无法精确标注每处修改的具体日期
 - 所有修改均在2026年期间完成，遵循GPL-3.0许可证
 
+# v2.2.4 (2026年08月17日)
+- 修复首条消息响应延迟约 40 秒的问题：聊天类型判断改为优先读取监听缓存（O(1)），不再全量扫描会话
+- wxbot 新增 GetListenChatType() 接口，bot 的 get_chat_type_info() 优先使用监听缓存，未监听时才回退全量扫描
+- 感谢 @liyifu-2026 提出的优化建议与方案
+
 # v2.2.3 (2026年08月16日)
 - 兼容层接上 wechatauto 新能力：拍一拍（WxMessage.tickle）、撤回消息（select_option('撤回')）、语音通话（WeChat.VoiceCall）——UIA 热激活 + OCR，委托 wechatauto 1.1.x 的 Chat.Poke / Chat.RecallLastMessage / Chat.VoiceCall
 - 语音通话不再降级跳过（原返回 False），现在真正发起（需 UIA 驱动可用）

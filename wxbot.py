@@ -431,6 +431,24 @@ class WeChat(_BaseWeChat):
 
     # ----------------------------------------------------------- 会话/窗口
 
+    def GetListenChatType(self, nickname):
+        """直接从已注册的监听对象读取聊天类型，避免全量扫描会话。
+
+        返回 "group"/"friend"；未监听该昵称时返回 None。
+        """
+        if not nickname:
+            return None
+        entry = self.listen.get(nickname)
+        if not entry:
+            return None
+        chat = entry[0] if isinstance(entry, tuple) else entry
+        try:
+            info = chat.ChatInfo()
+        except Exception as e:
+            log.warning("GetListenChatType(%s) 失败: %s", nickname, e)
+            return None
+        return info.get("chat_type")
+
     def GetAllSubWindow(self):
         """返回所有会话的 Chat 实例（用于 bot 判断群聊/私聊）。"""
         subs = []
