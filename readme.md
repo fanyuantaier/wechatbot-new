@@ -29,6 +29,7 @@
 <img src="Demo_Image/5.png" alt="示例图片4" width="900px">
 
 # 版本号
+- v2.2.5（2026-08-31：修复 WAL 合并后数据库解密缓存损坏导致死循环——改用 PRAGMA quick_check 全库校验，新增缓存自动失效+重建重试机制）
 - v2.2.4（2026-08-17：修复首条消息响应延迟约 40 秒——聊天类型判断优先读监听缓存 O(1)，不再全量扫描；wxbot 新增 GetListenChatType()）
 - v2.2.3（2026-08-16：兼容层接入拍一拍/撤回/语音通话，委托 wechatauto 1.1.x）
 - v2.2.2（2026-08-12：修复 PyPI/GitHub 描述乱码——readme 恢复正确 UTF-8 中文，description 重写）

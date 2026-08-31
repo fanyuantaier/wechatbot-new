@@ -1,3 +1,26 @@
+# v2.2.5 (2026年08月31日)
+
+## Bug 修复：WAL 合并后数据库缓存损坏导致死循环
+
+### 问题根因
+WAL 合并把过期/错位页写进解密缓存后，`_check_merged` 只用 `SELECT count(*) FROM sqlite_master` 校验——这只查 schema 树，数据页已损坏却依然通过。缓存 stamp 又标记为"已是最新"，于是后续每秒轮询都复用这份坏缓存，反复抛 `database disk image is malformed`，清缓存重建后同样复现（因为合并结果照样逃过校验），形成死循环。
+
+### 修复内容
+1. **`_check_merged`**：改用 `PRAGMA quick_check` 全库校验（含数据页/索引页），合并结果一损坏立即触发全量重建重试（db.py:974）
+2. **新增 `_invalidate_cache()`**：清空 workdir 中全部解密 .db/.stamp 缓存（保留 keys.json），日志输出「已清 N 个缓存文件等待重建」（db.py:1131）
+3. **查询统一入口 `_run_msg_query`**：`get_messages`/`get_new_messages`/`get_message_row`/`_find_media_rows` 查询命中 malformed 时清缓存→重建→自动重试一次，彻底恢复则抛给 Listener 跳过本轮，不再卡死（db.py:1180）
+4. **`_msg_conn` 修复**：命中连接之外的分片库连接立即关闭，避免 Windows 下删除缓存文件被占用（db.py:1151）
+
+### 验证
+- 损坏数据页时旧校验通过但 SELECT 抛 malformed、新校验返回 False
+- 模拟「首次损坏→清缓存重建→重试成功」与「持续损坏→重抛被 Listener 兜住」两条路径均通过
+
+### 依赖变更
+- wechatauto-replica 最低版本要求提升至 1.2.0（包含上述修复）
+
+---
+
+# v2.2.4 (2026年08月17日)
 # 更新日志 / CHANGELOG
 
 本文件记录了WeChatBot_WXAUTO_SE相对于原始KouriChat项目的主要修改历史。
