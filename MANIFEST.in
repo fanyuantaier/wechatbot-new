@@ -4,6 +4,9 @@ recursive-include templates *
 recursive-include Demo_Image *
 recursive-include forum_data *
 include LICENSE
+# 一键启动器：__init__.py 会执行同目录的 Run.exe（见文件内注释）
+include Run.exe
+include __init__.py
 include readme.md
 include CHANGELOG.md
 include requirements.txt
