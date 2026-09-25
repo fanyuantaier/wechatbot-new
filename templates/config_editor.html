@@ -1483,6 +1483,11 @@
                         { value: 'moonshot-v1-8k-vision-preview',   text: 'moonshot-v1-8k-vision-preview' },
                         { value: 'other', text: '其它' }
                     ];
+                } else if (apiUrl === 'https://api.deepseek.com' || apiUrl === 'https://api.deepseek.com/v1') {
+                    options = [
+                        { value: 'deepseek-flash', text: 'deepseek-flash' },
+                        { value: 'other', text: '其它' }
+                    ];
                 } else if (isWeAPIsUrlSync(apiUrl)) {
                     options = [
                         { value: 'gpt-4o', text: 'gpt-4o' },
@@ -3578,6 +3583,8 @@ document.getElementById('oneKeyDiagnosticButton').addEventListener('click', asyn
                 <li><a href="#" data-target="section-core-memory">核心记忆管理</a></li>
                 <li><a href="#" data-target="section-active-message">主动消息配置</a></li>
                 <li><a href="#" data-target="section-reminders">定时器与提醒</a></li>
+                <li><a href="#" data-target="section-recall-guard">防撤回</a></li>
+                <li><a href="#" data-target="section-moments">朋友圈查询</a></li>
                 <li><a href="#" data-target="section-text-commands">指令设置</a></li>
                 <li><a href="#" data-target="section-scheduled-restart">定时重启Bot配置</a></li>
                 <li><a href="#" data-target="section-fun-lab">趣味实验室</a></li>
@@ -3884,18 +3891,20 @@ document.getElementById('oneKeyDiagnosticButton').addEventListener('click', asyn
                         <label>图像识别API服务商：</label>
                         <select id="imageApiProvider" name="temp_IMAGE_BASE_URL">
                             <option value="https://api.moonshot.cn/v1" {% if config.MOONSHOT_BASE_URL=='https://api.moonshot.cn/v1' %}selected{% endif %}>MOONSHOT月之暗面</option>
+                            <option value="https://api.deepseek.com" {% if config.MOONSHOT_BASE_URL=='https://api.deepseek.com' %}selected{% endif %}>DeepSeek官方</option>
                             <option value="https://vg.v1api.cc/v1" {% if config.MOONSHOT_BASE_URL=='https://vg.v1api.cc/v1' %}selected{% endif %}>WeAPIs</option>
-                            <option value="other" {% if config.MOONSHOT_BASE_URL not in ['https://api.moonshot.cn/v1','https://vg.v1api.cc/v1'] %}selected{% endif %}>其它</option>
+                            <option value="other" {% if config.MOONSHOT_BASE_URL not in ['https://api.moonshot.cn/v1','https://api.deepseek.com','https://vg.v1api.cc/v1'] %}selected{% endif %}>其它</option>
                         </select>
-                        <input type="text" id="customImageApiUrl" class="custom-input" placeholder="请输入自定义API地址" {% if config.MOONSHOT_BASE_URL not in ['https://api.moonshot.cn/v1','https://vg.v1api.cc/v1'] %} value="{{ config.MOONSHOT_BASE_URL }}" style="display:block;" {% endif %}>
+                        <input type="text" id="customImageApiUrl" class="custom-input" placeholder="请输入自定义API地址" {% if config.MOONSHOT_BASE_URL not in ['https://api.moonshot.cn/v1','https://api.deepseek.com','https://vg.v1api.cc/v1'] %} value="{{ config.MOONSHOT_BASE_URL }}" style="display:block;" {% endif %}>
                         <input type="hidden" id="finalImageApiUrl" name="MOONSHOT_BASE_URL" value="{{ config.MOONSHOT_BASE_URL }}">
                         <small>推荐使用WeAPIs，API Key可与Chat模型配置保持一致。<a href="https://vg.v1api.cc/register?aff=WnGO" target="_blank">[点击注册]</a></small>
                         <small>MOONSHOT月之暗面注册地址：<a href="https://platform.moonshot.cn/" target="_blank">[点击注册]</a></small>
+                        <small>DeepSeek官方识图：API Key 填官方 Key（与 Chat 的 DeepSeek Key 可以不同），模型选 <code>deepseek-flash</code>。</small>
                     </div>
                     <div class="form-group">
                         <label>识图模型选择：</label>
                         <select id="imageModelSelect" name="temp_IMAGE_MODEL"></select>
-                        <input type="text" id="customImageModel" class="custom-input" placeholder="请输入自定义模型名称" {% if config.MOONSHOT_MODEL not in ['moonshot-v1-128k-vision-preview','moonshot-v1-32k-vision-preview','moonshot-v1-8k-vision-preview','gpt-4o'] %} value="{{ config.MOONSHOT_MODEL }}" style="display:block;" {% endif %}>
+                        <input type="text" id="customImageModel" class="custom-input" placeholder="请输入自定义模型名称" {% if config.MOONSHOT_MODEL not in ['moonshot-v1-128k-vision-preview','moonshot-v1-32k-vision-preview','moonshot-v1-8k-vision-preview','gpt-4o','deepseek-flash'] %} value="{{ config.MOONSHOT_MODEL }}" style="display:block;" {% endif %}>
                         <input type="hidden" id="finalImageModel" name="MOONSHOT_MODEL" value="{{ config.MOONSHOT_MODEL }}">
                     </div>
                     <div class="form-group">
@@ -4211,6 +4220,88 @@ document.getElementById('oneKeyDiagnosticButton').addEventListener('click', asyn
                     </div>
                 </div>
 
+                <div id="section-recall-guard" class="content-panel">
+                    <h2>防撤回</h2>
+                    <div class="form-group">
+                        <div class="switch-container">
+                            <div class="switch-item">
+                                <label>启用防撤回</label>
+                                <div class="switch"><label class="switch-label"><input type="checkbox" name="ENABLE_RECALL_GUARD" {% if config.ENABLE_RECALL_GUARD %}checked{% endif %}><span class="slider round"></span></label></div>
+                            </div>
+                            <div class="switch-item">
+                                <label>撤回时主动提醒（会往那个会话发消息）</label>
+                                <div class="switch"><label class="switch-label"><input type="checkbox" name="ENABLE_RECALL_NOTICE" {% if config.ENABLE_RECALL_NOTICE %}checked{% endif %}><span class="slider round"></span></label></div>
+                            </div>
+                        </div>
+                        <small>防撤回只在本机留底、不点界面、不发消息；「主动提醒」会真的往对应会话发一条含原文的消息，所以默认关闭。镜像与媒体备份在 <code>~/Documents/wechatauto_recall/</code>。</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="RECALL_BACKFILL_input">启动时回填历史条数:</label>
+                        <input type="number" step="1" min="0" id="RECALL_BACKFILL_input" name="RECALL_BACKFILL" value="{{ config.RECALL_BACKFILL or 50 }}">
+                        <small>每个监听会话启动时补进镜像多少条（0 = 不补）。回填越多启动越慢。</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="RECALL_SCAN_INTERVAL_input">撤回扫描间隔（秒）:</label>
+                        <input type="number" step="0.5" min="0.5" id="RECALL_SCAN_INTERVAL_input" name="RECALL_SCAN_INTERVAL" value="{{ config.RECALL_SCAN_INTERVAL or 2.0 }}">
+                        <small>越小发现得越快，读盘也越频繁。</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="RECALL_SCAN_LIMIT_input">每轮每会话重读条数:</label>
+                        <input type="number" step="1" min="1" id="RECALL_SCAN_LIMIT_input" name="RECALL_SCAN_LIMIT" value="{{ config.RECALL_SCAN_LIMIT or 30 }}">
+                        <small>只跟这些最新消息比对；调大可覆盖更早的撤回。</small>
+                    </div>
+                    <div class="form-group">
+                        <h3>可用指令</h3>
+                        <ul style="line-height:1.9;">
+                            <li><code>/撤回</code> 或 <code>/rc</code>：当前会话最近 5 条撤回原文。</li>
+                            <li><code>/撤回 10</code>：临时指定条数（最多 50）。</li>
+                            <li><code>/撤回统计</code> 或 <code>/rcs</code>：本会话撤回次数 + 谁最常撤回。</li>
+                        </ul>
+                        <small>开启之前已经被撤回的消息救不回来，指令里会写明「原文没救回来」。</small>
+                    </div>
+                </div>
+
+                <div id="section-moments" class="content-panel">
+                    <h2>朋友圈查询</h2>
+                    <div class="form-group">
+                        <div class="switch-container">
+                            <div class="switch-item">
+                                <label>启用 /朋友圈 查询</label>
+                                <div class="switch"><label class="switch-label"><input type="checkbox" name="ENABLE_MOMENTS_COMMAND" {% if config.ENABLE_MOMENTS_COMMAND %}checked{% endif %}><span class="slider round"></span></label></div>
+                            </div>
+                            <div class="switch-item">
+                                <label>启用 /朋友圈互动（谁赞了/评论了你）</label>
+                                <div class="switch"><label class="switch-label"><input type="checkbox" name="ENABLE_MOMENTS_INTERACTIONS" {% if config.ENABLE_MOMENTS_INTERACTIONS %}checked{% endif %}><span class="slider round"></span></label></div>
+                            </div>
+                            <div class="switch-item">
+                                <label>朋友圈监听：对方发新动态时在聊天里告知</label>
+                                <div class="switch"><label class="switch-label"><input type="checkbox" name="ENABLE_MOMENTS_WATCH" {% if config.ENABLE_MOMENTS_WATCH %}checked{% endif %}><span class="slider round"></span></label></div>
+                            </div>
+                        </div>
+                        <small>三个功能都只读本机 <code>sns.db</code>、不打开朋友圈界面。「互动」会告诉提问者你的账号收到了哪些赞和评论，属社交信息，默认关闭。</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="MOMENTS_QUERY_LIMIT_input">默认查询条数:</label>
+                        <input type="number" step="1" min="1" id="MOMENTS_QUERY_LIMIT_input" name="MOMENTS_QUERY_LIMIT" value="{{ config.MOMENTS_QUERY_LIMIT or 5 }}">
+                        <small>指令后面跟数字可临时改，例如 <code>/朋友圈 10</code>。</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="MOMENTS_WATCH_INTERVAL_input">监听轮询间隔（秒，最小 30）:</label>
+                        <input type="number" step="10" min="30" id="MOMENTS_WATCH_INTERVAL_input" name="MOMENTS_WATCH_INTERVAL" value="{{ config.MOMENTS_WATCH_INTERVAL or 120 }}">
+                        <small>只影响「朋友圈监听」，越小发现越快。</small>
+                    </div>
+                    <div class="form-group">
+                        <h3>可用指令</h3>
+                        <ul style="line-height:1.9;">
+                            <li><code>/朋友圈</code> 或 <code>/pyq</code>：发指令者最近 N 条动态（时间 + 摘要 + 图/视频/赞/评论数）。</li>
+                            <li><code>/朋友圈 老王</code>：看指定昵称或备注的人最近动态。</li>
+                            <li><code>/朋友圈 10</code>：只看最近 10 条。</li>
+                            <li><code>/朋友圈互动</code> 或 <code>/pyqi</code>：谁赞了 / 评论了你的朋友圈。</li>
+                        </ul>
+                        <small>只能读到本机已同步的动态；可见范围以本机微信权限为准（三天可见、分组可见不会被绕过）。</small>
+                    </div>
+                </div>
+
                 <div id="section-text-commands" class="content-panel">
                     <h2>指令设置</h2>
                     <div class="form-group">
@@ -4230,6 +4321,11 @@ document.getElementById('oneKeyDiagnosticButton').addEventListener('click', asyn
                             <li><code>/清除临时记忆</code> 或 <code>/cl</code>：清理当前聊天窗口对应的短期上下文与临时记忆。适用于AI回复出现异常（如乱码或思维链）时使用。</li>
                             <li><code>/允许语音通话</code> 或 <code>/ev</code>：允许使用语音通话进行定时提醒（仅私聊提醒有效）。</li>
                             <li><code>/禁止语音通话</code> 或 <code>/dv</code>：禁止使用语音通话进行定时提醒。</li>
+                            <li><code>/撤回</code> 或 <code>/rc</code>：查看当前会话最近被撤回的消息原文（需开启「防撤回」）。</li>
+                            <li><code>/撤回 10</code>：临时指定条数（最多 50）；<code>/撤回统计</code> 或 <code>/rcs</code> 看本会话撤回次数与谁最常撤回。</li>
+                            <li><code>/朋友圈</code> 或 <code>/pyq</code>：查看发指令者最近的朋友圈动态（时间 + 摘要 + 图/视频/赞/评论数量）。</li>
+                            <li><code>/朋友圈 老王</code> 看指定昵称/备注的人；<code>/朋友圈 10</code> 只看最近 10 条。</li>
+                            <li><code>/朋友圈互动</code> 或 <code>/pyqi</code>：谁赞了 / 评论了你的朋友圈（需在配置里开启）。</li>
                         </ul>
                     </div>
                 </div>
@@ -4379,7 +4475,7 @@ document.getElementById('oneKeyDiagnosticButton').addEventListener('click', asyn
             如您未收到完整的许可证副本，请访问 <a href="https://www.gnu.org/licenses/gpl-3.0.zh-cn.html" target="_blank">GNU GPL 3.0 中文版</a> 获取。</p>
             <p>源代码获取：<br>
             原项目源代码：<a href="https://github.com/KouriChat/KouriChat" target="_blank">https://github.com/KouriChat/KouriChat</a><br>
-            本项目源代码：<a href="https://github.com/awengege/WeChatBot" target="_blank">https://github.com/awengege/WeChatBot</a></p>
+            本项目源代码（fanyuantaier fork）：<a href="https://github.com/fanyuantaier/wechatbot-new" target="_blank">https://github.com/fanyuantaier/wechatbot-new</a><br>本 fork 由 <a href="https://github.com/fanyuantaier" target="_blank">fanyuantaier</a> 维护更新 · 哔哩哔哩 <a href="https://space.bilibili.com/3493122510162030" target="_blank">@fanyuantaier</a> · PyPI <a href="https://pypi.org/project/wechatbot-new/" target="_blank">wechatbot-new</a></p>
             <p>本软件仅供学习和娱乐使用，请勿用于违法用途，否则产生的一切法律责任均与任何作者无关。</p>
         </div>
     </div>

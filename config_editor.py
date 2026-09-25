@@ -180,12 +180,13 @@ def validate_config_types(config_path):
         int_fields = ['MAX_GROUPS', 'MAX_TOKEN', 'QUEUE_WAITING_TIME', 'EMOJI_SENDING_PROBABILITY', 
                      'MAX_MESSAGE_LOG_ENTRIES', 'MAX_MEMORY_NUMBER', 'PORT', 'ONLINE_API_MAX_TOKEN',
                      'REQUESTS_TIMEOUT', 'MAX_WEB_CONTENT_LENGTH', 'RESTART_INACTIVITY_MINUTES',
-                     'GROUP_CHAT_RESPONSE_PROBABILITY', 'ASSISTANT_MAX_TOKEN']
+                     'GROUP_CHAT_RESPONSE_PROBABILITY', 'ASSISTANT_MAX_TOKEN', 'MOMENTS_QUERY_LIMIT',
+                     'RECALL_BACKFILL', 'RECALL_SCAN_LIMIT', 'MOMENTS_WATCH_INTERVAL']
         
         # 检查应该是浮点数但被保存为字符串的配置项  
         float_fields = ['TEMPERATURE', 'MOONSHOT_TEMPERATURE', 'MIN_COUNTDOWN_HOURS', 'MAX_COUNTDOWN_HOURS',
                        'AVERAGE_TYPING_SPEED', 'RANDOM_TYPING_SPEED_MIN', 'RANDOM_TYPING_SPEED_MAX',
-                       'ONLINE_API_TEMPERATURE', 'RESTART_INTERVAL_HOURS', 'ASSISTANT_TEMPERATURE']
+                       'ONLINE_API_TEMPERATURE', 'RESTART_INTERVAL_HOURS', 'ASSISTANT_TEMPERATURE', 'RECALL_SCAN_INTERVAL']
         
         for field in int_fields:
             pattern = rf'{field}\s*=\s*[\'"](\d+)[\'"]'
@@ -419,7 +420,8 @@ def submit_config():
             'ENABLE_GROUP_AT_REPLY', 'ENABLE_GROUP_KEYWORD_REPLY','GROUP_KEYWORD_REPLY_IGNORE_PROBABILITY', 'REMOVE_PARENTHESES',
             'ENABLE_ASSISTANT_MODEL', 'USE_ASSISTANT_FOR_MEMORY_SUMMARY', 'ENABLE_FORUM_CUSTOM_MODEL',
             'IGNORE_GROUP_CHAT_FOR_AUTO_MESSAGE', 'ENABLE_SENSITIVE_CONTENT_CLEARING', 'SAVE_MEMORY_TO_SEPARATE_FILE',
-            'ENABLE_TEXT_COMMANDS'
+            'ENABLE_TEXT_COMMANDS', 'ENABLE_RECALL_GUARD', 'ENABLE_MOMENTS_COMMAND',
+            'ENABLE_RECALL_NOTICE', 'ENABLE_MOMENTS_INTERACTIONS', 'ENABLE_MOMENTS_WATCH'
         ]
         for field in boolean_fields:
             new_values_for_config_py[field] = field in request.form
@@ -953,7 +955,9 @@ def index():
                 'ENABLE_ONLINE_API', 'SEPARATE_ROW_SYMBOLS','ENABLE_SCHEDULED_RESTART',
                 'ENABLE_GROUP_AT_REPLY', 'ENABLE_GROUP_KEYWORD_REPLY','GROUP_KEYWORD_REPLY_IGNORE_PROBABILITY','REMOVE_PARENTHESES',
                 'ENABLE_ASSISTANT_MODEL', 'USE_ASSISTANT_FOR_MEMORY_SUMMARY',
-                'IGNORE_GROUP_CHAT_FOR_AUTO_MESSAGE', 'ENABLE_SENSITIVE_CONTENT_CLEARING', 'SAVE_MEMORY_TO_SEPARATE_FILE'
+                'IGNORE_GROUP_CHAT_FOR_AUTO_MESSAGE', 'ENABLE_SENSITIVE_CONTENT_CLEARING', 'SAVE_MEMORY_TO_SEPARATE_FILE',
+                'ENABLE_RECALL_GUARD', 'ENABLE_MOMENTS_COMMAND', 'ENABLE_RECALL_NOTICE',
+                'ENABLE_MOMENTS_INTERACTIONS', 'ENABLE_MOMENTS_WATCH'
             ]
             for field in boolean_fields_from_editor:
                  # 确保这些字段在表单中存在才处理，否则它们可能来自 quick_start
@@ -3574,6 +3578,16 @@ def get_default_config():
         "ENABLE_REMINDERS": True,
         "ALLOW_REMINDERS_IN_QUIET_TIME": True,
         "USE_VOICE_CALL_FOR_REMINDERS": False,
+        "ENABLE_RECALL_GUARD": True,
+        "RECALL_BACKFILL": 50,
+        "RECALL_SCAN_INTERVAL": 2.0,
+        "RECALL_SCAN_LIMIT": 30,
+        "ENABLE_RECALL_NOTICE": False,
+        "ENABLE_MOMENTS_COMMAND": True,
+        "MOMENTS_QUERY_LIMIT": 5,
+        "ENABLE_MOMENTS_INTERACTIONS": False,
+        "ENABLE_MOMENTS_WATCH": False,
+        "MOMENTS_WATCH_INTERVAL": 120,
         "ENABLE_ONLINE_API": False,
         "ONLINE_BASE_URL": 'https://vg.v1api.cc/v1',
         "ONLINE_MODEL": 'net-gpt-4o-mini',
@@ -3767,7 +3781,7 @@ if __name__ == '__main__':
 
     print("\033[32m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m")
     print("\033[32m✅ 配置编辑器启动成功！\033[0m")
-    print("\033[32m✅ 当前版本为：version：2.2.4\033[0m")
+    print("\033[32m✅ 当前版本为：version：2.2.6\033[0m")
     print("\033[32m⚠️ 请注意PC端微信\033[0m")
     print("\033[32m🈲 禁止登录新注册小号，极大几率封号\033[0m")
     print("\033[32m☣️ 买来你就被骗了，倒卖死全家喔\033[0m")

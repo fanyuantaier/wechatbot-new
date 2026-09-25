@@ -157,6 +157,20 @@ def get_dynamic_config(key, default_value=None):
         logger.warning(f"获取动态配置 {key} 失败: {e}")
         return default_value
 
+def _cfg_int(key, default):
+    """取整数配置：配置编辑器会把数字存成字符串，取不出来就退回默认值。"""
+    try:
+        return int(get_dynamic_config(key, default))
+    except (TypeError, ValueError):
+        return default
+
+def _cfg_float(key, default):
+    """取浮点配置，容错同 _cfg_int。"""
+    try:
+        return float(get_dynamic_config(key, default))
+    except (TypeError, ValueError):
+        return default
+
 # 用户消息队列和聊天上下文管理
 user_queues = {}  # {user_id: {'messages': [], 'last_message_time': 时间戳, ...}}
 queue_lock = threading.Lock()  # 队列访问锁
@@ -471,6 +485,10 @@ is_sending_message = False
 # 用于拍一拍功能的全局变量
 user_last_msg = {}  # {user_id: msg对象} 存储每个用户最后发送的消息对象
 bot_last_sent_msg = {}  # {user_id: wx.GetLastMessage()} 存储机器人发送给每个用户的最后一条消息
+
+# 朋友圈监听攒下的「对方刚发了新动态」，等下次聊天时随消息一起给模型
+moment_notes = {}  # {显示名: [提示文本, ...]}，每个会话最多留最近 3 条
+moment_notes_lock = threading.Lock()
 
 # --- 定时重启相关全局变量 ---
 program_start_time = 0.0 # 程序启动时间戳
@@ -1206,6 +1224,102 @@ def keep_alive():
         # 等待指定间隔后再进行下一次检查
         time.sleep(check_interval)
 
+# ==================== 防撤回：新撤回提醒 ====================
+
+def recall_notice_loop():
+    """轮询撤回记录，把新出现的撤回发一条提醒进那个会话（ENABLE_RECALL_NOTICE）。
+
+    只认「镜像里留过原文」的撤回（底层只记这种），首轮只建立水位，
+    不会把历史记录翻出来重发一遍。
+    """
+    seen_id = None
+    while True:
+        try:
+            events = wx.GetRecalled(limit=20)
+            newest = max((e.get("id") or 0 for e in events), default=0)
+            if seen_id is None:
+                seen_id = newest
+                logger.info(f"撤回提醒已就绪，当前水位 id={seen_id}")
+            elif newest > seen_id:
+                for ev in sorted(events, key=lambda x: x.get("id") or 0):
+                    if (ev.get("id") or 0) <= seen_id:
+                        continue
+                    chat = ev.get("chat")
+                    if not chat:
+                        continue
+                    original = (ev.get("original_content") or "").strip()
+                    who = ev.get("revoker") or "有人"
+                    text = (f"[撤回提醒] {who} 撤回了一条消息，原文：{original[:200]}"
+                            if original else
+                            f"[撤回提醒] {who} 撤回了一条消息（原文没救回来）")
+                    logger.info(f"撤回提醒 -> {chat}: {who} / {original[:40]}")
+                    send_reply(chat, chat, chat, "[撤回提醒]", text, is_system_message=True)
+                seen_id = newest
+        except Exception as e:
+            logger.error(f"撤回提醒线程异常: {e}", exc_info=True)
+        time.sleep(5)
+
+
+# ==================== 朋友圈：新动态监听 ====================
+
+def _record_moment_feeds(feeds, nick_of=None):
+    """把「监听对象发了新动态」记成待注入的提示，返回记录条数。
+
+    args:
+        feeds: wx.GetNewMoments() 返回的动态列表。
+        nick_of: wxid -> 显示名；默认用 wx.GetNickname，测试时可替换。
+    """
+    recorded = 0
+    for feed in feeds or []:
+        author = str(feed.get("username") or feed.get("tid") or "")
+        name = (nick_of or wx.GetNickname)(author) if author else ""
+        if not name or name not in user_names:
+            continue
+        text = (feed.get("text") or "").strip().replace("\n", " ")
+        extra = []
+        if feed.get("images"):
+            extra.append(f"{len(feed['images'])}图")
+        if feed.get("videos"):
+            extra.append(f"{len(feed['videos'])}视频")
+        note = f"[朋友圈动态] {name} 刚发了新动态：{text[:60] or '（无正文）'}"
+        if extra:
+            note += f"（{'/'.join(extra)}）"
+        with moment_notes_lock:
+            notes = moment_notes.setdefault(name, [])
+            notes.append(note)
+            moment_notes[name] = notes[-3:]
+        recorded += 1
+    return recorded
+
+
+def _take_moment_notes(who):
+    """取走并清空某个会话待注入的朋友圈提示。"""
+    if not who:
+        return []
+    with moment_notes_lock:
+        return moment_notes.pop(who, [])
+
+
+def moment_watch_loop():
+    """轮询朋友圈增量，把监听对象的新动态攒起来（ENABLE_MOMENTS_WATCH）。
+
+    纯读本地 sns.db，不打开朋友圈界面；首轮只建立水位、不记录。
+    """
+    since = None
+    while True:
+        try:
+            feeds, latest = wx.GetNewMoments(since)
+            if since is not None and latest is not None:
+                got = _record_moment_feeds(feeds)
+                if got:
+                    logger.info(f"朋友圈监听：记录 {got} 条新动态")
+            if latest is not None:
+                since = latest
+        except Exception as e:
+            logger.error(f"朋友圈监听线程异常: {e}", exc_info=True)
+        time.sleep(max(30, _cfg_int("MOMENTS_WATCH_INTERVAL", 120)))
+
+
 def message_listener(msg, chat):
     global can_send_messages
     who = chat.who 
@@ -1233,7 +1347,15 @@ def message_listener(msg, chat):
 
     if msgtype == 'voice':
         voicetext = msg.to_text()
-        original_content = (f"[语音消息]: {voicetext}")
+        # 语音取不到文字是常态（兼容层不做语音转文字），但「为什么没有」有分别：
+        # 微信没把音频落盘 vs 库/索引读不到。附一句说明，别让模型以为用户没说话。
+        voice_note = ''
+        try:
+            voice_note = msg.voice_note()
+        except Exception as voice_err:
+            logger.debug(f"语音可用性查询失败: {voice_err}")
+        suffix = f"（{voice_note}）" if voice_note else ""
+        original_content = (f"[语音消息]: {voicetext}{suffix}")
     
     if msgtype == 'link':
         cardurl = msg.get_url()
@@ -1270,7 +1392,7 @@ def message_listener(msg, chat):
                                 # 保存当前状态
                                 original_can_send_messages = can_send_messages
                                 # 处理图片
-                                content = recognize_image_with_moonshot(image_path, is_emoji=False)
+                                content = recognize_image(image_path, is_emoji=False)
                                 if content:
                                     logger.info(f"图片识别成功: {content}")
                                     content = f"[图片识别结果]: {content}"
@@ -1293,7 +1415,7 @@ def message_listener(msg, chat):
                                 # 保存当前状态
                                 original_can_send_messages = can_send_messages
                                 # 处理图片
-                                image_content = recognize_image_with_moonshot(content, is_emoji=False)
+                                image_content = recognize_image(content, is_emoji=False)
                                 if image_content:
                                     logger.info(f"图片识别成功: {image_content}")
                                     content = f"[图片识别结果]: {image_content}"
@@ -1393,6 +1515,8 @@ def message_listener(msg, chat):
             if not msgtype == 'image':
                 content_for_handler = f"[群聊消息-来自群'{who}'-发送者:{sender}]:{processed_group_content}"
             else:
+                # 图片的内容稍后会被识别结果整个替换掉，前缀在这儿加没用；
+                # 发送者改在 handle_wxauto_message 识别完成后再补（见那里）。
                 content_for_handler = processed_group_content
             
             if not content_for_handler and at_triggered and not keyword_triggered: 
@@ -1417,12 +1541,17 @@ def message_listener(msg, chat):
         else:
             handle_wxauto_message(msg, who)
 
-def recognize_image_with_moonshot(image_path, is_emoji=False):
+def recognize_image(image_path, is_emoji=False):
+    """调 OpenAI 兼容的视觉接口识别图片/表情包，返回描述文本。
+
+    接口地址/模型/Key 都取「图片与表情包识别配置」里的那一组（config.py 里的
+    MOONSHOT_* 字段）：月之暗面、WeAPIs、DeepSeek 官方（api.deepseek.com +
+    deepseek-flash）都走同一个请求体格式，换服务商不用改代码。
+    """
     # 先暂停向API发送消息队列
     global can_send_messages
     can_send_messages = False
 
-    """使用AI识别图片内容并返回文本"""
     try:
 
         processed_image_path = image_path
@@ -1430,7 +1559,13 @@ def recognize_image_with_moonshot(image_path, is_emoji=False):
         # 读取图片内容并编码
         with open(processed_image_path, 'rb') as img_file:
             image_content = base64.b64encode(img_file.read()).decode('utf-8')
-            
+
+        # 按扩展名给 MIME：DeepSeek 官方会按声明的格式校验，统一报 jpeg 有被拒的风险
+        ext = os.path.splitext(str(processed_image_path))[1].lower()
+        image_mime = {
+            '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
+        }.get(ext, 'image/jpeg')
+
         headers = {
             'Authorization': f'Bearer {MOONSHOT_API_KEY}',
             'Content-Type': 'application/json'
@@ -1442,7 +1577,7 @@ def recognize_image_with_moonshot(image_path, is_emoji=False):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_content}"}},
+                        {"type": "image_url", "image_url": {"url": f"data:{image_mime};base64,{image_content}"}},
                         {"type": "text", "text": text_prompt}
                     ]
                 }
@@ -1451,6 +1586,10 @@ def recognize_image_with_moonshot(image_path, is_emoji=False):
         }
         
         response = requests.post(f"{MOONSHOT_BASE_URL}/chat/completions", headers=headers, json=data)
+        if response.status_code != 200:
+            # 换服务商时最容易踩请求体不合规（例如图片没放在 user 消息里），
+            # raise_for_status 的异常不带响应体，这里把服务端原文打出来
+            logger.error(f"识图接口返回 {response.status_code}: {response.text[:300]}")
         response.raise_for_status()
         result = response.json()
         recognized_text = result['choices'][0]['message']['content']
@@ -1683,7 +1822,8 @@ def _schedule_restart(reason: str = "指令触发"):
             logger.error(f"执行重启失败: {e}", exc_info=True)
     threading.Timer(1.5, _do_restart).start()
 
-def _handle_text_command_if_any(original_content: str, user_id: str) -> bool:
+def _handle_text_command_if_any(original_content: str, user_id: str,
+                               sender_wxid: str = None) -> bool:
     """
     如检测到命令则执行并回复用户，返回 True 表示已处理并阻止后续流程。
     支持的命令：
@@ -1693,7 +1833,12 @@ def _handle_text_command_if_any(original_content: str, user_id: str) -> bool:
     /清除临时记忆 或 /cl - 清除当前聊天的临时上下文与记忆
     /允许语音通话 或 /ev - 允许使用语音通话提醒
     /禁止语音通话 或 /dv - 禁止使用语音通话提醒
+    /撤回 或 /rc - 查看当前会话最近被撤回的消息（含原文，需开启防撤回）
+    /朋友圈 或 /pyq - 查看当前会话对象最近的朋友圈动态
     /总结 或 /ms - 立即进行一次临时记忆总结成记忆片段
+
+    sender_wxid: 消息发送者的真 wxid（群聊里用来区分是谁发的；单聊可省略）。
+                 只有 /朋友圈 用它 —— 群里 who 是群名，按群名查不到任何动态。
     """
     try:
         # 动态检查文本命令开关
@@ -1704,6 +1849,9 @@ def _handle_text_command_if_any(original_content: str, user_id: str) -> bool:
             return False
 
         normalized = cmd.strip().replace('：', ':')
+        # 指令名与参数（形如「/撤回 10」「/朋友圈 老王」），下面按 cmd_name 分支
+        cmd_name = normalized.split()[0] if normalized else ''
+        cmd_arg = normalized[len(cmd_name):].strip()
         reply_text = None
 
         if normalized == '/重启' or normalized == '/re':
@@ -1753,6 +1901,112 @@ def _handle_text_command_if_any(original_content: str, user_id: str) -> bool:
             send_reply(user_id, user_id, user_id, command_label, reply_text, is_system_message=True)
             return True
 
+        if cmd_name in ('/撤回', '/rc', '/撤回统计', '/rcs'):
+            is_stat = cmd_name in ('/撤回统计', '/rcs')
+            command_label = '[命令]' + cmd_name
+            # 参数：条数（默认 5，最多 50）；统计模式固定看最近 500 条
+            limit = 500 if is_stat else 5
+            if not is_stat and cmd_arg.isdigit():
+                limit = max(1, min(50, int(cmd_arg)))
+            try:
+                events = wx.GetRecalled(chat=user_id, limit=limit)
+            except Exception as e:
+                logger.error(f"查询撤回记录失败: {e}")
+                events = []
+            if not events:
+                reply_text = '没有记录到撤回消息（防撤回未开启，或撤回发生在监听开始之前）。'
+            elif is_stat:
+                counter = {}
+                for ev in events:
+                    who = ev.get('revoker') or '未知'
+                    counter[who] = counter.get(who, 0) + 1
+                top = sorted(counter.items(), key=lambda kv: -kv[1])[:3]
+                latest = max((ev.get('revoke_time') or 0) for ev in events)
+                reply_text = ('本会话共记录 %d 次撤回（统计最近 %d 条记录）：\n' % (len(events), limit)
+                              + '\n'.join('%s：%d 次' % (k, v) for k, v in top)
+                              + '\n最近一次：' + time.strftime('%m-%d %H:%M', time.localtime(latest)))
+            else:
+                lines = []
+                for ev in events:
+                    when = time.strftime(
+                        '%m-%d %H:%M', time.localtime(ev.get('revoke_time') or 0))
+                    revoker = ev.get('revoker') or '有人'
+                    original = (ev.get('original_content') or '').strip() or '（原文没救回来）'
+                    lines.append(f"{when} {revoker} 撤回了：{original[:120]}")
+                reply_text = '最近 %d 条撤回：\n' % len(events) + '\n'.join(lines)
+            send_reply(user_id, user_id, user_id, command_label, reply_text, is_system_message=True)
+            return True
+
+        if cmd_name in ('/朋友圈互动', '/pyqi'):
+            command_label = '[命令]' + cmd_name
+            if not get_dynamic_config('ENABLE_MOMENTS_INTERACTIONS', False):
+                reply_text = ('朋友圈互动查询已关闭（配置项 ENABLE_MOMENTS_INTERACTIONS）；'
+                              '开启后可以查询「谁赞了/评论了你的朋友圈」。')
+            else:
+                try:
+                    items = wx.GetMomentInteractions(
+                        only_unread=False, limit=_cfg_int('MOMENTS_QUERY_LIMIT', 5))
+                except Exception as e:
+                    logger.error(f"查询朋友圈互动失败: {e}")
+                    items = []
+                if not items:
+                    reply_text = '没读到朋友圈互动记录（还没有人赞/评论你的动态，或本地库还没同步）。'
+                else:
+                    lines = []
+                    for it in items:
+                        when = time.strftime(
+                            '%m-%d %H:%M', time.localtime(it.get('create_time') or 0))
+                        who = it.get('from_nickname') or it.get('from_username') or '有人'
+                        body = (it.get('content') or '').strip()
+                        if it.get('type') == 2:
+                            action = f"评论：{body}" if body else '评论了你的动态'
+                        else:
+                            action = '赞了你的动态'
+                        unread = '（未读）' if it.get('unread') else ''
+                        lines.append(f"{when} {who} {action}{unread}")
+                    reply_text = '最近的朋友圈互动：\n' + '\n'.join(lines)
+            send_reply(user_id, user_id, user_id, command_label, reply_text, is_system_message=True)
+            return True
+
+        if cmd_name in ('/朋友圈', '/pyq'):
+            command_label = '[命令]' + cmd_name
+            if not get_dynamic_config('ENABLE_MOMENTS_COMMAND', True):
+                reply_text = '朋友圈查询指令已关闭（配置项 ENABLE_MOMENTS_COMMAND）。'
+                send_reply(user_id, user_id, user_id, command_label, reply_text, is_system_message=True)
+                return True
+            # 参数：纯数字 = 条数；其它 = 要看谁的动态（昵称/备注）
+            limit = max(1, _cfg_int('MOMENTS_QUERY_LIMIT', 5))
+            target = sender_wxid or user_id
+            target_label = '本人'
+            if cmd_arg.isdigit():
+                limit = max(1, min(50, int(cmd_arg)))
+            elif cmd_arg:
+                target = cmd_arg
+                target_label = cmd_arg
+            try:
+                feeds = wx.GetMoments(who=target, limit=limit)
+            except Exception as e:
+                logger.error(f"查询朋友圈失败: {e}")
+                feeds = []
+            if not feeds:
+                reply_text = f'没读到 {target_label} 的动态（可能没发过，或朋友圈数据还没同步到本地库）。'
+            else:
+                lines = []
+                for feed in feeds:
+                    ts = feed.get('create_time') or 0
+                    when = time.strftime('%m-%d %H:%M', time.localtime(int(ts))) if ts else '时间未知'
+                    text = (feed.get('text') or '').strip().replace('\n', ' ') or '（无正文）'
+                    extra = []
+                    for key, label in (('images', '图'), ('videos', '视频'),
+                                       ('likes', '赞'), ('comments', '评论')):
+                        if feed.get(key):
+                            extra.append(f"{len(feed[key])}{label}")
+                    suffix = f"（{'/'.join(extra)}）" if extra else ''
+                    lines.append(f"{when} {text[:100]}{suffix}")
+                reply_text = f'{target_label} 最近 {len(feeds)} 条朋友圈：\n' + '\n'.join(lines)
+            send_reply(user_id, user_id, user_id, command_label, reply_text, is_system_message=True)
+            return True
+
         if normalized == '/总结' or normalized == '/ms':
             try:
                 # 立即进行一次临时记忆总结，无论ENABLE_MEMORY是否启用
@@ -1798,7 +2052,8 @@ def handle_wxauto_message(msg, who):
 
         # 文本指令优先处理（如/重启、/清除临时记忆等）
         try:
-            if _handle_text_command_if_any(original_content, username):
+            if _handle_text_command_if_any(original_content, username,
+                                           getattr(msg, 'sender_wxid', None)):
                 return
         except Exception as e:
             logger.error(f"指令解析失败: {e}")
@@ -1886,9 +2141,13 @@ def handle_wxauto_message(msg, who):
         if img_path:
             logger.info(f"开始识别图片/表情 - 用户 {username}: {img_path}")
             # 调用识别函数
-            recognized_text = recognize_image_with_moonshot(img_path, is_emoji=is_emoji)
+            recognized_text = recognize_image(img_path, is_emoji=is_emoji)
             # 使用识别结果或回退占位符更新 processed_content
             processed_content = recognized_text if recognized_text else ("[图片]" if not is_emoji else "[动画表情]")
+            # 群聊里图片/表情的发送者会被上面的识别结果覆盖掉，这里补回来。
+            # wechatauto 1.2.4.1 起这类消息也能解析出真名（旧版只有个数字，所以当初排除了）。
+            if is_user_group_chat(who) and msg.sender and not str(msg.sender).isdigit():
+                processed_content = f"[群聊消息-发送者:{msg.sender}] {processed_content}"
             can_send_messages = True # 确保识别后可以发送消息
             logger.info(f"图片/表情识别完成，结果: {processed_content}")
 
@@ -1916,6 +2175,14 @@ def handle_wxauto_message(msg, who):
                     logger.warning(f"未能从链接 {url_to_fetch} 提取有效文本内容。将按原始消息处理。")
                     # 如果抓取失败，processed_content 保持不变（可能是原始文本，或图片/表情占位符）
             # else: (如果没找到URL) 不需要操作，继续使用当前的 processed_content
+
+        # --- 3.5 朋友圈监听攒下的新动态（ENABLE_MOMENTS_WATCH）---
+        moment_note_list = _take_moment_notes(username)
+        if moment_note_list:
+            note_prefix = "；".join(moment_note_list)
+            processed_content = (f"{note_prefix}\n{processed_content}"
+                                 if processed_content else note_prefix)
+            logger.info(f"注入朋友圈动态提示 -> {username}: {len(moment_note_list)} 条")
 
         # --- 4. 记录用户消息到记忆 (如果启用) ---
         log_user_message_to_memory(username, processed_content)
@@ -4238,6 +4505,34 @@ def main():
                 logger.error(f"\033[31m添加监听用户{user_name}失败，请确保您在用户列表填写的微信昵称/备注与实际完全匹配，并且不要包含表情符号和特殊符号，注意填写的不是自己登录的微信昵称!\033[0m")
                 exit(1)
         logger.info("监听用户添加完成")
+
+        # 挂上防撤回（镜像 + 媒体备份，纯读库、只写自己的镜像目录，不驱动界面）
+        # 默认值写在这里而不是引用全局：老用户的 config.py 里没有这些新键，
+        # 直接引用会在启动时 NameError。
+        recall_on = get_dynamic_config('ENABLE_RECALL_GUARD', True)
+        if recall_on:
+            started = wx.StartRecallGuard(
+                backfill=_cfg_int('RECALL_BACKFILL', 50),
+                scan_interval=_cfg_float('RECALL_SCAN_INTERVAL', 2.0),
+                scan_limit=_cfg_int('RECALL_SCAN_LIMIT', 30))
+            if started:
+                logger.info("防撤回已启用（/撤回 查看原文，/撤回统计 看谁最常撤回）")
+            else:
+                logger.warning("防撤回启用失败，/撤回 将没有记录。")
+        else:
+            logger.info("防撤回已禁用 (ENABLE_RECALL_GUARD = False)。")
+
+        if recall_on and get_dynamic_config('ENABLE_RECALL_NOTICE', False):
+            recall_notice_thread = threading.Thread(target=recall_notice_loop, name="RecallNotice")
+            recall_notice_thread.daemon = True
+            recall_notice_thread.start()
+            logger.info("撤回提醒已启用（发现新的撤回时会主动发一条提醒）。")
+
+        if get_dynamic_config('ENABLE_MOMENTS_WATCH', False):
+            moment_watch_thread = threading.Thread(target=moment_watch_loop, name="MomentWatch")
+            moment_watch_thread.daemon = True
+            moment_watch_thread.start()
+            logger.info("朋友圈监听已启用（监听对象发新动态时会在聊天里告知）。")
         
         # 初始化所有用户的自动消息计时器 - 总是初始化，以便功能开启时立即可用
         logger.info("正在加载用户自动消息计时器状态...")

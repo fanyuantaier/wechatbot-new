@@ -33,8 +33,11 @@ MAX_TOKEN = 2000
 # DeepSeek温度
 TEMPERATURE = 0.7
 
-# Moonshot AI配置（用于图片和表情包识别）
-# API申请https://platform.moonshot.cn/
+# 图片/表情包识别的 API 配置（Web UI 里选服务商：月之暗面 / DeepSeek官方 / WeAPIs / 其它）
+# DeepSeek 官方已支持图片输入，用同一套字段即可：
+#   MOONSHOT_BASE_URL = 'https://api.deepseek.com'
+#   MOONSHOT_MODEL = 'deepseek-flash'
+#   下面这个 API Key 填 DeepSeek 官方 Key（与 Chat 的 DEEPSEEK_API_KEY 可以不同）
 MOONSHOT_API_KEY = 'YOUR_API_KEY'
 MOONSHOT_BASE_URL = 'https://vg.v1api.cc/v1'
 MOONSHOT_MODEL = 'gpt-4o'
@@ -87,7 +90,7 @@ CORE_MEMORY_DIR = 'CoreMemory'
 ACCEPT_ALL_GROUP_CHAT_MESSAGES = False
 ENABLE_GROUP_AT_REPLY = True
 ENABLE_GROUP_KEYWORD_REPLY = True
-GROUP_KEYWORD_LIST = ['樊伊航', '机器人', '人机']
+GROUP_KEYWORD_LIST = ['机器人', '人机']
 GROUP_CHAT_RESPONSE_PROBABILITY = 0
 GROUP_KEYWORD_REPLY_IGNORE_PROBABILITY = True
 
@@ -109,6 +112,31 @@ ALLOW_REMINDERS_IN_QUIET_TIME = True
 # 是否使用语音通话进行提醒
 # 群聊无法使用语音通话进行提醒
 USE_VOICE_CALL_FOR_REMINDERS = True
+
+# 防撤回：挂载后把监听会话的消息镜像到本地（只读微信库 + 写自己的镜像目录，
+# 不驱动界面），对方撤回后用 /撤回 指令可以看到原文。镜像目录见
+# ~/Documents/wechatauto_recall
+ENABLE_RECALL_GUARD = True
+# 启动时把每个会话最近多少条历史消息补进镜像（0 = 不补）
+RECALL_BACKFILL = 50
+# 撤回轮询间隔（秒）
+RECALL_SCAN_INTERVAL = 2.0
+# 每会话每轮重读最近多少条消息用于比对
+RECALL_SCAN_LIMIT = 30
+# 发现新的撤回时，由机器人往那个会话发一条提醒（含原文）。会主动发消息，默认关
+ENABLE_RECALL_NOTICE = False
+
+# 文本指令 /朋友圈（或 /pyq）：查看发指令者（或指定昵称）最近的朋友圈动态
+# 读本地 sns.db，不打开微信界面
+ENABLE_MOMENTS_COMMAND = True
+# /朋友圈 每次返回的条数（也可在指令后面直接跟数字，如「/朋友圈 10」）
+MOMENTS_QUERY_LIMIT = 5
+# /朋友圈互动（或 /pyqi）：查询「谁赞了/评论了你的朋友圈」。含账号社交信息，默认关
+ENABLE_MOMENTS_INTERACTIONS = False
+# 朋友圈监听：轮询监听对象的新动态，等对方下次发消息时随上下文告知模型
+ENABLE_MOMENTS_WATCH = False
+# 朋友圈监听轮询间隔（秒，最小 30）
+MOMENTS_WATCH_INTERVAL = 120
 
 # 联网API配置
 ENABLE_ONLINE_API = True

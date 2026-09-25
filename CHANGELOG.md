@@ -1,3 +1,59 @@
+# v2.2.6 (2026年09月25日)
+
+## 依赖更新：wechatauto-replica >= 1.2.4.1（微信 4.1.15 上发送会直接失败）
+
+### 为什么必须抬下限
+`wechatauto-replica 1.2.4` 才修好微信 4.1.15 的**收起式搜索入口**。在 4.1.15.13 上，低于 1.2.4 的版本 `open_chat` 会直接失败——机器人根本发不出去消息。此前下限停在 `>=1.2.0`（`requirements.txt` 更是停在 `>=1.0.4`），用户装到老版本就会表现为「收到消息但发不出去」。
+
+- `pyproject.toml` / `requirements.txt` 统一为 `wechatauto-replica[guia]>=1.2.4.1`
+- 该版本还带 `_open` 并发修复、`get_messages` 负数入参改为空返回
+
+## 新增：接入 wechatauto 1.2.x 的新能力
+
+1. **群消息发送者身份**（1.2.4.1）：`WxMessage.sender_wxid` 是真 wxid，`sender` 是备注/昵称。此前群里的**图片/文件/语音**只能解析出一个数字 ID，日志和给模型的上下文里都是无意义的数字；现在同样能认出人（库侧实测非文本 0% → 99.6%）。群聊图片/表情识别完成后也会补上发送者。
+2. **语音取不到音频的原因**（1.2.4.1）：`WxMessage.voice_note()` 区分「微信没把音频落盘（要在微信里播放过一次）」和「库/索引读不到」，并随语音消息一起进入模型上下文，不再只给模型一个空的 `[语音消息]:`。
+3. **防撤回**（`RecallGuard`）：`ENABLE_RECALL_GUARD` 开启后把监听会话的消息镜像到本地（只读微信库 + 写自己的镜像目录 `~/Documents/wechatauto_recall`，不操作界面），新增 `/撤回`（`/rc`）指令查看被撤回的原文。监听开始前就被撤回的救不回来，会明确显示「原文没救回来」。
+4. **朋友圈查询**（纯读 `sns.db`，不打开微信界面）：新增 `/朋友圈`（`/pyq`）指令，查看当前聊天对象最近 N 条动态（时间、正文摘要、图/视频/赞/评论数）。配置项 `ENABLE_MOMENTS_COMMAND`、`MOMENTS_QUERY_LIMIT`。
+5. **群成员**：`WeChat.GetGroupMembers()`（静态读库），配合 `sender_wxid` 可以认出不在通讯录里的群成员。
+
+## 新增：识图接上 DeepSeek（官方 API 已支持图片输入）
+
+- Web UI「图片/表情包识别配置」的服务商下拉新增 **DeepSeek官方**，模型下拉自动给出 `deepseek-flash`。
+  请求体与现有 Moonshot/WeAPIs 路径完全一致（`image_url` + base64 data URL、图片放在 user 消息里），所以沿用的还是原来那一组配置字段：
+  - 接口：`https://api.deepseek.com/chat/completions`，模型 `deepseek-flash`
+  - API Key 填 DeepSeek 官方 Key（与 Chat 的 `DEEPSEEK_API_KEY` 可以不同，填在识图区块的 API Key 里）
+  - 文档：https://api-docs.deepseek.com/zh-cn/guides/vision
+  - 用第三方中转（如 WeAPIs）的，仍可在服务商里选「其它/WeAPIs」并手填支持识图的 deepseek 模型名
+- 顺手改：
+  - 图片 MIME 按扩展名给（png/gif/webp/jpeg）。原来统一声明 `image/jpeg`，对按格式校验的服务端有被拒风险。
+  - 识图接口非 200 时把服务端返回体写进日志 —— 换服务商最容易踩请求体不合规（例如图片没放在 user 消息里），而 `raise_for_status` 抛出的异常不带响应体，光看异常看不出来。
+  - `recognize_image_with_moonshot` 改名 `recognize_image`：它早就不只服务 Moonshot 了。
+
+## 新增功能：防撤回 / 朋友圈（多开关 + 多指令）
+
+### 防撤回
+- `/撤回 10`（或 `/rc 10`）：临时指定条数，最多 50（不写数字默认 5）。
+- `/撤回统计`（或 `/rcs`）：本会话一共被撤回多少次、谁最常撤回（前 3）、最近一次是什么时候。
+- **撤回提醒**（`ENABLE_RECALL_NOTICE`，默认关）：发现新的撤回时，机器人主动往**那个会话**发一条带原文的提醒。首轮只建立水位，不会把历史记录翻出来重发；同一条只发一次；原文没救回来会写明。
+- 三个可调项：`RECALL_BACKFILL`（启动时每会话回填多少条历史，0 = 不补）、`RECALL_SCAN_INTERVAL`（扫描间隔秒）、`RECALL_SCAN_LIMIT`（每轮每会话重读条数）。
+
+### 朋友圈
+- `/朋友圈 老王`：查看指定昵称/备注的人最近动态；`/朋友圈 10`：临时指定条数。
+- `/朋友圈互动`（或 `/pyqi`，`ENABLE_MOMENTS_INTERACTIONS`，默认关）：谁赞了、谁评论了你的朋友圈（带未读标记）。属账号社交信息，默认关闭。
+- **朋友圈监听**（`ENABLE_MOMENTS_WATCH` + `MOMENTS_WATCH_INTERVAL`，默认关）：轮询监听对象的新动态，等对方下次发消息时随上下文一起给模型（例如对方刚发了动态，机器人聊天时就知道）。纯读本地 `sns.db`，首轮只建水位。
+- 兼容层新增 `WeChat.GetNickname()`（wxid → 备注/昵称），用于把动态发布者对到「用户列表」里填的名字。
+
+### 网页
+- 配置页的「防撤回」「朋友圈查询」两个面板改成**以开关和输入框为主**（新增 5 个开关/数值项），原理性长文移到帮助页。
+- 帮助页 `/bzwd` 的这两节改成「能做什么 / 注意」的功能清单，并列出全部指令与开关。
+
+## 修正
+
+- **默认节流档位改为 `fast`**：wechatauto 1.2.3 起对外发写动作默认按 `natural` 档限速（间隔 2.5~6s、120s 内 6 次后冷却 30~75s），会把本项目的分段回复拖住。现在兼容层用 `os.environ.setdefault("WECHATAUTO_RHYTHM", "fast")` 设为快档（间隔 0.6~1.4s、20 次/120s），用户自己设的同名环境变量仍然优先。
+- `GetAllSubWindow()` 的会话上限从 50 提到 500（与 wechatauto 自己的监听发现一致）：此前「最近 50 个会话之外」的群聊会判不出类型。
+
+---
+
 # v2.2.5 (2026年08月31日)
 
 ## Bug 修复：WAL 合并后数据库缓存损坏导致死循环

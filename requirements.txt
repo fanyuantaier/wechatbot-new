@@ -2,7 +2,7 @@
 # 导入名为 wechatauto（发布名 wechatauto-replica）。guia 扩展提供
 # 「坐标+OCR」发送（GUI 操作，依赖 winsdk / pypinyin），wxbot.py 用到的
 # wechatauto.wx 会引入 guia。
-wechatauto-replica[guia]>=1.0.4
+wechatauto-replica[guia]>=1.2.4.1
 
 # ==================== Web UI ====================
 flask
