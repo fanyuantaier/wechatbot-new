@@ -34,6 +34,7 @@
 <img src="Demo_Image/5.png" alt="示例图片4" width="900px">
 
 # 版本号
+- v2.2.8.4（2026-10-17：仅文档——PyPI 描述里的离线包链接换成 2.2.8.3 那份；2.2.8.3 的说明书里那个包带着同一个连接泄漏，离线用户会踩坑）
 - v2.2.8.3（2026-10-17：修 2.2.8 引入的连接泄漏——判「我」时读 `status` 没关 `_msg_conns` 的分片连接，导致缓存重建被 Windows 拒绝，监听轮询/防撤回扫描刷 `PermissionError(13)` 且收不到新消息；`status_votes()` 改 try/finally 全关，回归测试补齐）
 - v2.2.8.2（2026-10-03：仅文档——离线包直链换成 2.2.8.1 那份，代码与依赖零改动；发这个号只是为了让链接进 PyPI 描述）
 - v2.2.8.1（2026-10-03：**代码与 2.2.8 一字未改**，只是撤回重发——2.2.8 的 wheel/sdist 里打进了打包机的真实 `config.py`（含 2 个联系人昵称，无密钥无令牌），该版本号作废；发布链路上加了「构建前查工作副本、构建后查产物」的 config.py 占位校验）
@@ -72,8 +73,8 @@
 
 不想在目标机上装 Python、也不想联网拉依赖，可以直接用离线包：一个自包含目录，里面是官方嵌入式 Python 3.12 运行时 + 本项目全部依赖，解压即用，不需要管理员权限。
 
-- **下载**：`wechatbot-new-offline-2.2.8.1.zip`（142.6 MB，解压后 393 MB，4700 个文件 + 889 个目录条目）
-  https://livefile.xesimg.com/programme/python_assets/38b0312752cece199400864abf0f67aa.zip
+- **下载**：`wechatbot-new-offline-2.2.8.3.zip`（142.8 MB，解压后 394 MB，4704 个文件 + 890 个目录条目；包内 `wechatauto-replica 1.2.6.1`）
+  https://livefile.xesimg.com/programme/python_assets/8e4a588d4a7c4dbbeceada4b418fec0e.zip
 - **怎么用**：解压后双击 `start.bat` 打开配置网页（登录微信 → 填 API → Start Bot）；`wx.bat 你的脚本.py` 用包内 Python 跑任意脚本；`diagnose.bat` 自检能不能解密本地数据库；`README-offline.md` 是完整说明。
 - **前提**：64 位 Windows 10/11，微信 4.1.12 及以上且已登录；**不要「以管理员身份运行」**——微信以普通权限运行时，提权进程读它的内存会被系统拒绝，表现为取不到密钥。
 - **出厂配置是占位内容**（`微信名1` / `角色1`），包内不含任何人的昵称或聊天记录；数据库密钥缓存在 `%LOCALAPPDATA%\wechatauto_keys\`、风格档案与节流配置在 `%USERPROFILE%\.wechatauto\`，都写在当前用户目录、不跟着包走，别把这两个目录发给别人。
