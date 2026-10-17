@@ -84,5 +84,40 @@ ck("HTML 实体还原", got[1][1] == "收到&好的", got[1])
 ck("时间戳转成了可读时间", got[0][2].startswith(time.strftime("%m-%d", time.localtime(1750000000))), got[0][2])
 ck("解析不出来给空列表不是 None", wxbot._parse_merge_records("<msg>没有 item</msg>") == [])
 
+# 5) 连接必须关：不关会让缓存重建的 os.replace 变成 PermissionError(13)，
+#    监听/防撤回从此每轮报错（2.2.8 线上就是这么炸的）
+class _FakeConn:
+    def __init__(self, rows, boom=False):
+        self.rows, self.closed, self.boom = rows, False, boom
+
+    def execute(self, sql, args=()):
+        if self.boom:
+            raise RuntimeError("execute 失败")
+        return list(self.rows)
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeDB:
+    def __init__(self, conns):
+        self._conns = conns
+
+    def _msg_conns(self, user, **kw):
+        return self._conns
+
+
+TBL = "Msg_" + "0" * 32
+c1, c2 = _FakeConn([(2, 2), (4, 2), (69, 3)]), _FakeConn([(94, 0)])
+v = wxbot.status_votes(_FakeDB([(c1, TBL), (c2, TBL)]), "u")
+ck("status_votes 统计正确", v == {"2": [1, 1], "4": [1, 1], "69": [1, 0], "94": [1, 0]}, v)
+ck("status_votes 用完关闭全部分片连接", c1.closed and c2.closed, (c1.closed, c2.closed))
+c3 = _FakeConn([])
+wxbot.status_votes(_FakeDB([(c3, "不是表名")]), "u")
+ck("表名不合规时也要关连接", c3.closed)
+c4 = _FakeConn([], boom=True)
+wxbot.status_votes(_FakeDB([(c4, TBL)]), "u")
+ck("查询抛错时也要关连接", c4.closed)
+
 print("\n%s" % ("失败 %d 项: %s" % (len(FAILS), FAILS) if FAILS else "全部通过"))
 sys.exit(1 if FAILS else 0)

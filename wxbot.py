@@ -398,25 +398,35 @@ def status_votes(db, username, since=0, until=0, cap=0):
     except Exception as e:
         wxlog.warning("读 status 失败（只用 XML 证据判定「我」）: %s" % e)
         return {}
-    for conn, table in conns or []:
-        if not _MSG_TABLE_RE.match(str(table)):          # 表名进 SQL 前先卡死格式
-            continue
-        sql = 'SELECT real_sender_id, status FROM "%s"' % table
-        args = []
-        if since and until:
-            sql += " WHERE create_time BETWEEN ? AND ?"
-            args += [int(since), int(until)]
-        if cap:
-            sql += " ORDER BY sort_seq DESC LIMIT ?"
-            args.append(int(cap))
-        try:
-            for sid, st in conn.execute(sql, args):
-                v = out.setdefault(str(sid), [0, 0])
-                v[0] += 1
-                if st == 2:
-                    v[1] += 1
-        except Exception as e:
-            wxlog.warning("分片 %s 读 status 失败: %s" % (table, e))
+    try:
+        for conn, table in conns or []:
+            if not _MSG_TABLE_RE.match(str(table)):      # 表名进 SQL 前先卡死格式
+                continue
+            sql = 'SELECT real_sender_id, status FROM "%s"' % table
+            args = []
+            if since and until:
+                sql += " WHERE create_time BETWEEN ? AND ?"
+                args += [int(since), int(until)]
+            if cap:
+                sql += " ORDER BY sort_seq DESC LIMIT ?"
+                args.append(int(cap))
+            try:
+                for sid, st in conn.execute(sql, args):
+                    v = out.setdefault(str(sid), [0, 0])
+                    v[0] += 1
+                    if st == 2:
+                        v[1] += 1
+            except Exception as e:
+                wxlog.warning("分片 %s 读 status 失败: %s" % (table, e))
+    finally:
+        # _msg_conns 的 docstring 写着「调用方负责 close 连接」——不关的话，
+        # Windows 上这几个句柄会让缓存重建的 os.replace 一直失败（PermissionError 13），
+        # 监听轮询和防撤回扫描从此每轮报错、也再收不到新消息。2.2.8 就是这么炸的。
+        for conn, _table in conns or []:
+            try:
+                conn.close()
+            except Exception:
+                pass
     return out
 
 

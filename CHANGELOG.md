@@ -1,3 +1,23 @@
+# v2.2.8.3 (2026年10月17日)
+
+## 修：监听轮询与防撤回扫描刷屏 `PermissionError(13, '拒绝访问。')`
+
+线上表现：控制台被 `listener poll error: PermissionError(13, '拒绝访问。')` 和
+`recall scan error: ...` 刷满，**同时收不到新消息**（监听线程每轮都在抛，等于停摆）。
+
+根因是 2.2.8 新加的 `status_votes()`（判「我」时读 `status` 列）漏关数据库连接。
+`WeChatDB._msg_conns()` 的 docstring 明写「**调用方负责 close 连接**（避免 Windows 下删除缓存被占用）」，
+漏关之后这些句柄一直占着解密缓存，wechatauto 每次重建缓存时 `os.replace(tmp, message_N.db)` 都会
+被 Windows 拒绝——`os.replace` 抛 `WinError 5`，Python 包成 `PermissionError(13)`。监听轮询和
+防撤回扫描都会触发重建，于是两边一起刷屏，且不会自愈（直到进程重启）。
+
+- 修复：`status_votes()` 用 `try/finally` 关闭全部分片连接（含表名不合规、查询抛错两条提前返回的路径）。
+  `tools/style_profile.py` 里同一段代码一并修了。
+- 回归：`test_wxbot.py` 加 4 项（假连接断言 `close()` 一定被调用：正常、表名不合规、execute 抛错）。
+  另做了一次真实库验证：判完「我」之后强制 `_invalidate_cache()` 再读——修复前抛 `PermissionError`，
+  修复后正常返回。
+- **已经装 2.2.8 / 2.2.8.1 / 2.2.8.2 的，重启一次进程即可临时恢复；装了本版才是根治。**
+
 # v2.2.8.2 (2026年10月03日)
 
 ## 仅文档：离线包链接换成 2.2.8.1 那份
