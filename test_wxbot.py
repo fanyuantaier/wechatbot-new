@@ -7,7 +7,10 @@
 2026-06 之后是 2。写死 `sender_id == 2` 会把整段旧历史里的我算成对方，
 风格档案于是照着对方的口吻写，再被当成这个人设发出去。
 """
+import os
+import shutil
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, ".")
@@ -118,6 +121,72 @@ ck("表名不合规时也要关连接", c3.closed)
 c4 = _FakeConn([], boom=True)
 wxbot.status_votes(_FakeDB([(c4, TBL)]), "u")
 ck("查询抛错时也要关连接", c4.closed)
+
+# 6) 风格档案：生成器会把「偶尔回同一句话刷几遍」写进 system prompt
+prof = ("**说话风格**：句子短，常拆成多条连发，一句一条；语气随意；"
+        "会连发同一句或动画表情。\n\n"
+        "**模仿要点**：\n"
+        "1. 回复尽量短，一句一条。\n"
+        "2. 适当发动画表情，偶尔回同一句话刷几遍。\n"
+        "3. 忙时可以回「稍后再聊」。")
+clean = wxbot.sanitize_history_profile(prof)
+ck("档案里的「同一句刷几遍」被删掉", "同一句" not in clean and "刷几遍" not in clean, clean)
+ck("「一句一条」这类正常风格保留", "一句一条" in clean, clean)
+ck("「适当发动画表情」保留", "适当发动画表情" in clean, clean)
+ck("「稍后再聊」保留", "稍后再聊" in clean, clean)
+only_num = "2. 偶尔回同一句话刷几遍。"
+ck("只剩序号的空条目被整行丢掉", wxbot.sanitize_history_profile(only_num) == "",
+   wxbot.sanitize_history_profile(only_num))
+ck("没有重复指令时原文不动",
+   wxbot.sanitize_history_profile("回复尽量短。\n用词口语化。") == "回复尽量短。\n用词口语化。")
+ck("空档案不炸", wxbot.sanitize_history_profile("") == "")
+
+# 7) 发送前去掉相邻重复段：档案让模型「再刷一遍」时不能真刷
+ck("同一段连发三次只发一次",
+   wxbot.dedupe_repeated_parts(["晚安", "晚安", "晚安"]) == ["晚安"])
+ck("不相邻的重复不合并",
+   wxbot.dedupe_repeated_parts(["好的", "嗯", "好的"]) == ["好的", "嗯", "好的"])
+ck("动作标记不参与合并",
+   wxbot.dedupe_repeated_parts(["[tickle]", "[tickle]"]) == ["[tickle]", "[tickle]"])
+long_sent = "今天下午一起去操场走走吧。"
+ck("一段里相邻的同一句只留一次",
+   wxbot.dedupe_repeated_parts([long_sent * 2]) == [long_sent],
+   wxbot.dedupe_repeated_parts([long_sent * 2]))
+ck("短语气词「哈哈」不硬合",
+   wxbot.dedupe_repeated_parts(["哈哈。哈哈。"]) == ["哈哈。哈哈。"])
+ck("空段被丢掉、顺序不变",
+   wxbot.dedupe_repeated_parts(["", "   ", "早上好"]) == ["早上好"])
+
+# 8) 单实例锁：两个 bot 各连一份监听库，每条消息会被各回一遍
+lock_dir = tempfile.mkdtemp(prefix="wxbot_lock_")
+lock_path = os.path.join(lock_dir, "bot.lock")
+fh1, st1 = wxbot.acquire_instance_lock(lock_path)
+ck("首次获取实例锁", st1 == "locked" and fh1 is not None, st1)
+fh2, st2 = wxbot.acquire_instance_lock(lock_path)
+ck("第二个实例拿不到锁", st2 == "busy" and fh2 is None, st2)
+wxbot.release_instance_lock(fh1)
+fh3, st3 = wxbot.acquire_instance_lock(lock_path)
+ck("释放后可以重新获取", st3 == "locked" and fh3 is not None, st3)
+wxbot.release_instance_lock(fh3)
+ck("锁文件里写了本进程 PID",
+   open(lock_path, "rb").read().startswith(b"pid="), open(lock_path, "rb").read())
+try:
+    shutil.rmtree(lock_dir)
+except OSError:
+    pass
+
+# 9) 同一会话被两个名字订阅时只算一次（否则每条消息各回一遍）
+class _FakeChat:
+    def __init__(self, wxid):
+        self._wxid = wxid
+
+ck("按 wxid 认出同一会话的别名",
+   wxbot.find_listen_alias({"备注名": (_FakeChat("wxid_a"), None)}, "wxid_a") == "备注名")
+ck("不同会话不算别名",
+   wxbot.find_listen_alias({"甲": (_FakeChat("wxid_a"), None)}, "wxid_b") is None)
+ck("空监听表/空 wxid 不报错",
+   wxbot.find_listen_alias({}, "wxid_a") is None
+   and wxbot.find_listen_alias({"甲": (_FakeChat("wxid_a"), None)}, "") is None)
 
 print("\n%s" % ("失败 %d 项: %s" % (len(FAILS), FAILS) if FAILS else "全部通过"))
 sys.exit(1 if FAILS else 0)

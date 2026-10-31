@@ -34,3 +34,6 @@ COMMIT_MSG.txt
 
 # 临时发版正文草稿（不入库）
 release-*.md
+
+# 单实例锁（运行时生成）
+.bot_instance.lock

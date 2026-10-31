@@ -34,7 +34,9 @@ import os
 import ctypes
 os.environ["PROJECT_NAME"] = 'iwyxdxl/WeChatBot_WXAUTO_SE'
 # 消息收发由 wxbot 兼容层驱动（wechatauto，适配微信 4.x 自绘渲染）
-from wxbot import WeChat, is_wechat_asset_url
+from wxbot import (WeChat, is_wechat_asset_url, sanitize_history_profile,
+                   dedupe_repeated_parts, acquire_instance_lock,
+                   release_instance_lock)
 from wechatauto.param import WxParam
 WxParam.ENABLE_FILE_LOGGER = False
 WxParam.FORCE_MESSAGE_XBIAS = True
@@ -447,6 +449,35 @@ console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
+# --- 单实例锁：同一目录只允许一个 bot ---
+# 两个实例各连一份监听库，每条消息会被各回一遍（用户看到的就是「重复说两遍」）。
+# 锁由系统在进程退出时释放；重启（os.execv）前会先主动放锁。
+_BOT_BASE_DIR = (os.path.dirname(os.path.abspath(sys.executable))
+                 if getattr(sys, "frozen", False)
+                 else os.path.dirname(os.path.abspath(__file__)))
+_INSTANCE_LOCK_PATH = os.path.join(_BOT_BASE_DIR, ".bot_instance.lock")
+instance_lock = None
+
+
+def _acquire_instance_lock_or_exit():
+    global instance_lock
+    instance_lock, status = acquire_instance_lock(_INSTANCE_LOCK_PATH)
+    if status == "busy":
+        logger.error("\033[31m同一目录下已有一个机器人进程在运行，本进程退出。"
+                     "同时跑两个实例会让每条消息各回一遍。\033[0m")
+        sys.exit(1)
+    if status.startswith("error:"):
+        logger.warning(f"实例锁不可用（{status[6:]}），跳过重复实例检查")
+
+
+def _release_instance_lock():
+    global instance_lock
+    release_instance_lock(instance_lock)
+    instance_lock = None
+
+
+_acquire_instance_lock_or_exit()
+
 # 获取微信窗口对象
 try:
     logger.info("\033[32m正在初始化微信接口...\033[0m")
@@ -759,7 +790,9 @@ def get_history_profile(user_id):
             text = f.read().strip()
         if text:
             logger.debug(f"用户 {user_id} 使用聊天记录风格档案（{len(text)} 字）")
-            return text
+            # 老档案里可能写着「偶尔回同一句话刷几遍」——那是从发送重试留下的
+            # 重复记录里学来的假风格，直接用会让 AI 真的复读。
+            return sanitize_history_profile(text)
     except Exception as e:
         logger.error(f"读取风格档案失败 {user_id}: {e}")
     return None
@@ -906,13 +939,19 @@ def inject_history_context(messages_to_send, user_id, message):
                 f"{'预读' if first_turn else '按需重读'}）")
 
 
+# 所有 system prompt 末尾都加这一条：档案/聊天记录里出现的「同一句连发」是从
+# 故障记录里学来的，不能让模型把它当风格；正常 prompt 也一并受益。
+_NO_REPEAT_RULE = ("\n\n【输出要求】每条回复里同一句话只说一遍；不要原样重复上一句，"
+                   "也不要把相同内容拆成多条连发。")
+
+
 # 修改get_user_prompt函数
 def get_user_prompt(user_id):
     # 启用了「聊天记录风格模仿」的用户：用生成的风格档案替代他的 prompt 文件，
     # 记忆仍按原来的规则合并进去（不然开了档案就丢记忆了）。
     profile = get_history_profile(user_id)
     if profile:
-        return _apply_memory_to_prompt(user_id, profile)
+        return _apply_memory_to_prompt(user_id, profile) + _NO_REPEAT_RULE
 
     # 查找映射中的文件名，若不存在则使用user_id
     prompt_file = prompt_mapping.get(user_id, user_id)
@@ -960,7 +999,7 @@ def get_user_prompt(user_id):
     if prompt_content is None:
         raise FileNotFoundError(f"无法读取Prompt文件内容: {prompt_path}")
 
-    return _apply_memory_to_prompt(user_id, prompt_content)
+    return _apply_memory_to_prompt(user_id, prompt_content) + _NO_REPEAT_RULE
 
 
 def _apply_memory_to_prompt(user_id, prompt_content):
@@ -2037,7 +2076,14 @@ def _schedule_restart(reason: str = "指令触发"):
                 except Exception:
                     pass
             logger.info(f"正在执行重启 (原因: {reason}) ...")
-            os.execv(sys.executable, ['python'] + sys.argv)
+            # execv 在 Windows 上是「起新进程 + 退旧进程」，不放锁的话新进程
+            # 会把自己当成重复实例直接退出。
+            _release_instance_lock()
+            try:
+                os.execv(sys.executable, ['python'] + sys.argv)
+            except Exception:
+                _acquire_instance_lock_or_exit()
+                raise
         except Exception as e:
             logger.error(f"执行重启失败: {e}", exc_info=True)
     threading.Timer(1.5, _do_restart).start()
@@ -2594,7 +2640,11 @@ def send_reply(user_id, sender_name, username, original_merged_message, reply, i
         reply = remove_timestamps(reply)
         if REMOVE_PARENTHESES:
             reply = remove_parentheses_and_content(reply)
-        parts = split_message_with_context(reply)
+        raw_parts = split_message_with_context(reply)
+        parts = dedupe_repeated_parts(raw_parts)
+        if len(parts) != len(raw_parts):
+            logger.warning(f"回复里有 {len(raw_parts) - len(parts)} 段相邻重复内容，"
+                           f"已去掉（用户 {user_id}）")
 
         if not parts:
             logger.warning(f"回复消息在分割/清理后为空，无法发送给 {user_id}。")

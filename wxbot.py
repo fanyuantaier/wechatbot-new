@@ -381,6 +381,145 @@ _XML_SELF_RE = re.compile(r'fromusername\s*=\s*["\']?\s*([A-Za-z0-9_\-@]+)')
 _MSG_TABLE_RE = re.compile(r'^Msg_[0-9a-f]{32}$')
 _SENDER_PREFIX_RE = re.compile(r"^(wxid_[^\s:\n]+|gh_[^\s:\n]+|\d{6,}):\n")
 
+# 「把同一句话再说一遍」这种指令。风格档案是模型从聊天记录总结出来、又原样当
+# system prompt 用的：记录里只要出现过连发的同一句（旧版发送重试会把一条消息
+# 发两遍），总结就会写成「偶尔回同一句话刷几遍」，AI 于是真的开始复读。
+_REPEAT_HINTS = ("同一句", "复读", "刷屏", "刷几遍", "说两遍", "发两遍",
+                 "重复一遍", "重复这句", "再发一遍")
+_CLAUSE_SEP = re.compile(r"[，,；;、]")
+_SENT_END = re.compile(r"[。！？!?]")
+_ACTION_PARTS = ("[tickle]", "[tickle_self]", "[recall]")
+_SENT_KEEP = re.compile(r"(?<=[。！？!?\n])")
+
+
+def sanitize_history_profile(text):
+    """删掉风格档案里教模型「重复/连发同一句」的子句，其余原样保留。
+
+    只处理命中的行：按句号/分号/逗号切开，丢掉含重复暗示的子句再拼回去。
+    生成端（config_editor 的 PROFILE_PROMPT_HEADER）已经加了禁令，这里是为了
+    兜住用户机器上**已经生成好**的档案——重新生成之前它们还在生效。
+    """
+    if not isinstance(text, str) or not text:
+        return text
+
+    def _hit(seg):
+        return any(h in seg for h in _REPEAT_HINTS)
+
+    lines = []
+    changed = 0
+    for line in text.splitlines():
+        if not _hit(line):
+            lines.append(line)
+            continue
+        changed += 1
+        sentences = []
+        for sent in _SENT_END.split(line):
+            kept = [c.strip() for c in _CLAUSE_SEP.split(sent)
+                    if c.strip() and not _hit(c)]
+            if not kept:
+                continue
+            merged = "，".join(kept)
+            # 只剩一个列表序号（"3."）就没有保留价值
+            if not re.sub(r"^\s*\d+[.、]\s*", "", merged).strip("，。 "):
+                continue
+            sentences.append(merged + "。")
+        if sentences:
+            lines.append("".join(sentences))
+    if changed:
+        log.info("风格档案里删掉了 %d 行「重复同一句」的指令（多半是发送重试留下的假风格）",
+                 changed)
+    return "\n".join(lines)
+
+
+def collapse_repeated_sentences(text, min_len=6):
+    """把一段里**相邻且完全相同**的长句压成一句；短语气词（"哈哈。"）不动。"""
+    if not isinstance(text, str) or not text:
+        return text
+    out = []
+    for sent in _SENT_KEEP.split(text):
+        core = sent.strip()
+        if (out and core and len(core) >= int(min_len)
+                and core == out[-1].strip() and out[-1].strip()):
+            continue
+        out.append(sent)
+    return "".join(out)
+
+
+def dedupe_repeated_parts(parts, min_sentence=6):
+    """发送前去掉相邻重复的文本段。
+
+    * 相邻两段完全相同（"晚安$晚安"）只留一段；
+    * 一段内部相邻两句完全相同且够长，只留一句；
+    * [tickle]/[tickle_self]/[recall] 是动作，不参与合并。
+    """
+    out = []
+    for part in parts or []:
+        if not isinstance(part, str) or not part.strip():
+            continue
+        if part in _ACTION_PARTS:
+            out.append(part)
+            continue
+        part = collapse_repeated_sentences(part, min_sentence)
+        if out and out[-1] not in _ACTION_PARTS and out[-1] == part:
+            continue
+        out.append(part)
+    return out
+
+
+def acquire_instance_lock(path):
+    """同一目录只允许一个 bot 进程（返回 ``(句柄, 状态)``）。
+
+    状态：``locked`` 拿到锁；``busy`` 已有实例在跑；``error:<原因>`` 锁文件都打不开
+    （宁可放行也不要把程序挡死）。Windows 用 ``msvcrt`` 建议锁，进程崩溃由系统释放，
+    不会留下"死锁文件"；句柄必须一直存活到进程退出。
+    """
+    try:
+        fh = open(path, "a+b")
+    except OSError as e:
+        return None, "error:%s" % e
+    try:
+        if os.name == "nt":
+            import msvcrt
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        try:
+            fh.close()
+        except Exception:
+            pass
+        return None, "busy"
+    try:
+        fh.seek(0)
+        fh.truncate()
+        fh.write(b"pid=%d\n" % os.getpid())
+        fh.flush()
+    except OSError:
+        pass
+    return fh, "locked"
+
+
+def release_instance_lock(fh):
+    """释放 :func:`acquire_instance_lock` 的锁（重启 execv 前必须调用）。"""
+    if fh is None:
+        return
+    try:
+        if os.name == "nt":
+            import msvcrt
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    except OSError:
+        pass
+    try:
+        fh.close()
+    except Exception:
+        pass
+
 
 def status_votes(db, username, since=0, until=0, cap=0):
     """``{sender_id: [条数, 其中 status==2 的条数]}``。
@@ -857,6 +996,17 @@ class WxMessage:
         return "<WxMessage %s from %s: %s>" % (self.type, self.sender, self.content[:50])
 
 
+def find_listen_alias(listen, uname):
+    """在 ``wx.listen`` 里找已经订阅了 ``uname`` 的键（同一会话的另一个名字）。"""
+    if not uname:
+        return None
+    for name, entry in (listen or {}).items():
+        chat = entry[0] if isinstance(entry, tuple) else entry
+        if getattr(chat, "_wxid", None) == uname:
+            return name
+    return None
+
+
 class WeChat(_BaseWeChat):
     """兼容层主类：在 wechatauto.wx.WeChat 之上补齐 bot 需要的接口。"""
 
@@ -907,6 +1057,19 @@ class WeChat(_BaseWeChat):
         uname = self._resolve_uname(nickname)
         if uname is None:
             return WxResponse.failure("找不到聊天窗口: %s" % nickname)
+        # 同一个会话可能被两个名字（备注/昵称）各订阅一次：监听器按 wxid 分发，
+        # 两个回调都会触发，于是每条消息各回一遍。只登记别名，不重复注册。
+        alias = find_listen_alias(self.listen, uname)
+        if alias is not None:
+            existing_chat = self.listen[alias]
+            existing_chat = existing_chat[0] if isinstance(existing_chat, tuple) else existing_chat
+            wrapper = self._listen_wrappers.get(alias)
+            self.listen[nickname] = (existing_chat, callback)
+            if wrapper is not None:
+                self._listen_wrappers[nickname] = wrapper
+            wxlog.warning("会话 %s 已经以「%s」监听，新增的「%s」只登记别名，不重复订阅",
+                          uname, alias, nickname)
+            return existing_chat
         if not self._listener_is_listening:
             self._listener_start()  # 首次调用，listen 为空，仅启动监听线程
         chat = _BaseChat(nickname, self._gui, self._db)

@@ -270,9 +270,90 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+def _bot_dir():
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _pid_is_our_bot(pid):
+    """进程还活着，且（命令行读得到时）确实是本目录的 bot。"""
+    if not pid:
+        return False
+    try:
+        if not psutil.pid_exists(pid):
+            return False
+    except Exception:
+        return False
+    try:
+        proc = psutil.Process(pid)
+        cmd = proc.cmdline() or []
+    except Exception:
+        return True   # 进程在但读不到命令行：宁可信其有，别重复启动
+    joined = ' '.join(str(x) for x in cmd).lower()
+    if 'bot.py' not in joined and 'bot.exe' not in joined:
+        return False
+    try:
+        cwd = proc.cwd()
+    except Exception:
+        cwd = ''
+    if cwd and os.path.normcase(os.path.abspath(cwd)) == os.path.normcase(_bot_dir()):
+        return True
+    return _bot_dir().lower() in joined
+
+
+def _find_all_running_bot_pids():
+    """列出本目录下所有在跑的 bot（含不是本 Flask 进程拉起的）。
+
+    网页服务重启、或 bot 是从命令行/Run.exe 直接启动时，``bot_process`` 是空的，
+    但机器人还在跑。以前这里不看心跳和命令行，再点一次「启动」就会起第二个实例，
+    两条监听线程各回一遍——用户看到的就是每条消息重复说两遍。
+    """
+    pids = set()
+    if bot_process is not None and bot_process.poll() is None:
+        pids.add(bot_process.pid)
+    if _pid_is_our_bot(current_bot_pid):
+        pids.add(current_bot_pid)
+    try:
+        for proc in psutil.process_iter(['pid', 'cmdline']):
+            if proc.pid == os.getpid():
+                continue
+            try:
+                cmd = proc.info.get('cmdline') or []
+            except Exception:
+                continue
+            joined = ' '.join(str(x) for x in cmd).lower()
+            if 'bot.py' not in joined and 'bot.exe' not in joined:
+                continue
+            try:
+                cwd = proc.cwd()
+            except Exception:
+                cwd = ''
+            if cwd and os.path.normcase(os.path.abspath(cwd)) == os.path.normcase(_bot_dir()):
+                pids.add(proc.pid)
+            elif _bot_dir().lower() in joined:
+                pids.add(proc.pid)
+    except Exception:
+        pass
+    pids.discard(os.getpid())
+    return sorted(pids)
+
+
+def _find_running_bot_pid():
+    pids = _find_all_running_bot_pids()
+    return pids[0] if pids else None
+
+
 @app.route('/start_bot', methods=['POST'])
 def start_bot():
     global bot_process
+    running_pid = _find_running_bot_pid()
+    if running_pid:
+        app.logger.warning('拒绝重复启动：机器人已在运行 (PID %s)', running_pid)
+        return jsonify({
+            'error': 'already_running',
+            'message': '机器人已经在运行（PID %d），请先停止再启动；'
+                       '两个实例会让每条消息各回一遍。' % running_pid,
+            'pid': running_pid,
+        }), 409
     if bot_process is None or bot_process.poll() is not None:
         # 如果目录下存在 user_timers.json 则删除
         user_timers_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'user_timers.json')
@@ -304,38 +385,20 @@ def start_bot():
 @app.route('/stop_bot', methods=['POST'])
 def stop_bot():
     global bot_process, last_heartbeat_time, current_bot_pid
-    # 检查状态时，也考虑 current_bot_pid 是否指示有活跃进程
-    is_considered_running = False
-    if bot_process and bot_process.poll() is None:
-        is_considered_running = True
-    elif (time.time() - last_heartbeat_time) < HEARTBEAT_TIMEOUT and current_bot_pid is not None:
-        try:
-            if psutil.pid_exists(current_bot_pid): # 确保PID对应的进程还存在
-                 is_considered_running = True
-        except Exception: # psutil.pid_exists 可能会抛出异常，例如权限问题
-            pass
+    # 一次清掉所有实例：旧版本可能留下两个（重复回复的根因），只杀一个的话
+    # 另一个还会继续回消息。
+    pids_to_attempt_kill = set(_find_all_running_bot_pids())
 
-    if not is_considered_running:
+    if not pids_to_attempt_kill:
         app.logger.info("尝试停止机器人，但根据进程对象和心跳判断，机器人似乎已停止。")
-        # 即使如此，也调用stop_bot_process来清理状态
-        stop_bot_process(pid_to_kill=current_bot_pid if current_bot_pid else (bot_process.pid if bot_process else None))
+        stop_bot_process(pid_to_kill=None)
         return {'status': 'stopped'}, 200
-    else:
-        pid_from_flask_process = bot_process.pid if bot_process else None
-        # 优先使用 current_bot_pid，因为它更可能是最新的
-        # 如果 current_bot_pid 和 flask 记录的 pid 不同，且 flask 的 pid 进程也存在，都尝试杀掉
-        pids_to_attempt_kill = set()
-        if current_bot_pid:
-            pids_to_attempt_kill.add(current_bot_pid)
-        if pid_from_flask_process:
-            pids_to_attempt_kill.add(pid_from_flask_process)
 
-        app.logger.info(f"准备停止机器人，目标PID(s): {pids_to_attempt_kill}")
-        for pid in pids_to_attempt_kill:
-            stop_bot_process(pid_to_kill=pid) # 传入要杀死的PID
+    app.logger.info(f"准备停止机器人，目标PID(s): {pids_to_attempt_kill}")
+    for pid in pids_to_attempt_kill:
+        stop_bot_process(pid_to_kill=pid)
 
-        # 最终状态由 stop_bot_process 设置 current_bot_pid 和 last_heartbeat_time
-        return {'status': 'stopped'}, 200
+    return {'status': 'stopped'}, 200
     
 @app.route('/bot_status')
 def bot_status():
@@ -1210,7 +1273,10 @@ PROFILE_PROMPT_HEADER = (
     "2. 再给出「我」和对方的关系与最近聊的事情（上下文中出现过的话题、约定、称呼），"
     "只写聊天记录里确实有的，不要编造细节。\n"
     "3. 最后写 3-6 条「模仿要点」，用祈使句写给 AI，例如「回复尽量短，一句一条」。\n"
-    "4. 全文用中文，不超过 600 字，不要加\"以下是\"\"好的\"这类开场白，不要复述聊天记录原文大段内容。\n\n"
+    "4. 全文用中文，不超过 600 字，不要加\"以下是\"\"好的\"这类开场白，不要复述聊天记录原文大段内容。\n"
+    "5. **不要把重复当风格**：记录里同一句话/同一个表情连发多遍，通常是发送重试或误操作"
+    "留下的，不是说话习惯。不要把它总结成「连发」「刷屏」「再说一遍」之类的要点，"
+    "也不要在任何地方建议 AI 重复同一句话。\n\n"
     "聊天记录：\n")
 
 
