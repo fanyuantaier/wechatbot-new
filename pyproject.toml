@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wechatbot-new"
-version = "2.2.8.5"
+version = "2.2.8.6"
 description = "智能微信聊天机器人（基于 KouriChat 重构）：接入 DeepSeek/GPT/Gemini 大模型，拟人化角色扮演、记忆、情绪表情包、定时任务、联网搜索；兼容微信 4.1.12+，底层使用 wechatauto-replica"
 readme = "readme.md"
 requires-python = ">=3.9"
@@ -41,7 +41,7 @@ dependencies = [
 Homepage = "https://github.com/fanyuantaier/wechatbot-new"
 Source = "https://github.com/fanyuantaier/wechatbot-new"
 Issues = "https://github.com/fanyuantaier/wechatbot-new/issues"
-Download-offline = "https://livefile.xesimg.com/programme/python_assets/cf1b5c02b7c200b6da614e373b7ed475.zip"
+Download-offline = "https://livefile.xesimg.com/programme/python_assets/b7ab6c6c0cd8ef3f0568fe9365f2b60d.zip"
 
 [project.scripts]
 wechatbot = "bot:main"
