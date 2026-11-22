@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<!-- saved from url=(0047)-->
+<html lang="zh-CN" dir="ltr" class="dark"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>WeChatBot帮助文档</title>
+<style id="vl-theme">
+/* ============================================================
+   Virtual Life 设计系统 · WeChatBot WebUI 全局换肤
+   统一注入到 5 个页面 <head> 顶部（覆盖原浅色默认样式）
+   ============================================================ */
+:root {
+  --vl-bg-0: #1a1d24;         /* 页面底 */
+  --vl-bg-1: #242830;         /* 卡片 */
+  --vl-bg-2: #1a1d24;         /* 输入/更深 */
+  --vl-line: #383e4c;         /* 边框 */
+  --vl-line-soft: #2e3340;
+  --vl-text: #d8d4c8;         /* 正文暖白 */
+  --vl-text-bright: #e8e4d8;  /* 标题 */
+  --vl-text-dim: #777d8a;     /* 次要 */
+  --vl-accent: #8a9a6b;       /* 主色 苔绿 */
+  --vl-accent-soft: #a3c48c;
+  --vl-accent-bg: #3a4a2e;
+  --vl-accent-line: #4a5a3a;
+  --vl-warn: #5a4a3a;
+  --vl-danger: #ff6b6b;
+  --vl-radius: 10px;
+  --vl-font: "PingFang SC", "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif;
+  --vl-mono: "Cascadia Code", Consolas, monospace;
+}
+
+/* 全局底色与字体 */
+body {
+  background: linear-gradient(160deg, var(--vl-bg-0), #242830) !important;
+  color: var(--vl-text) !important;
+  font-family: var(--vl-font) !important;
+}
+
+/* 顶栏 */
+.header-bar {
+  background: rgba(26, 29, 36, 0.92) !important;
+  border-bottom: 1px solid var(--vl-line) !important;
+  box-shadow: 0 1px 0 rgba(138, 154, 107, 0.15) !important;
+  backdrop-filter: blur(8px);
+}
+.header-bar .header-title h1, h1 { color: var(--vl-text-bright) !important; }
+h1, h2, h3 { color: var(--vl-text-bright) !important; font-family: var(--vl-font) !important; }
+h2 {
+  border-bottom: 1px solid var(--vl-line-soft) !important;
+  letter-spacing: 1px !important;
+}
+h3 { color: var(--vl-accent) !important; }
+
+/* 侧栏 */
+.sidebar {
+  background: var(--vl-bg-1) !important;
+  border-right: 1px solid var(--vl-line) !important;
+}
+.sidebar li a {
+  color: var(--vl-text) !important;
+  border-radius: 8px !important;
+  margin: 2px 8px !important;
+  transition: all 0.2s !important;
+}
+.sidebar li a:hover { background: var(--vl-accent-bg) !important; color: var(--vl-accent-soft) !important; }
+.sidebar li a.active {
+  background: var(--vl-accent-bg) !important;
+  color: var(--vl-accent-soft) !important;
+  border-left: 3px solid var(--vl-accent) !important;
+}
+#mobileMenuToggle { background: var(--vl-accent) !important; }
+#mobileMenuToggle:hover { background: var(--vl-accent-line) !important; }
+#sidebarOverlay { background: rgba(0,0,0,0.5) !important; }
+
+/* 主内容容器与卡片 */
+.content, .main-content, section, .card, .form-section {
+  background: transparent !important;
+}
+input, select, textarea {
+  background: var(--vl-bg-2) !important;
+  border: 1px solid var(--vl-line) !important;
+  color: var(--vl-text) !important;
+  border-radius: 8px !important;
+  font-family: var(--vl-font) !important;
+  transition: border-color 0.2s, box-shadow 0.2s !important;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none !important;
+  border-color: var(--vl-accent) !important;
+  box-shadow: 0 0 0 2px rgba(138, 154, 107, 0.25) !important;
+}
+input::placeholder, textarea::placeholder { color: var(--vl-text-dim) !important; }
+label { color: var(--vl-text) !important; }
+small, .help-text, .description { color: var(--vl-text-dim) !important; }
+
+/* 按钮 */
+button, .nav-button, a.nav-button, input[type="submit"] {
+  background: var(--vl-accent-bg) !important;
+  border: 1px solid var(--vl-accent-line) !important;
+  color: #c8d8a8 !important;
+  border-radius: 8px !important;
+  font-family: var(--vl-font) !important;
+  transition: all 0.2s !important;
+}
+button:hover, .nav-button:hover, a.nav-button:hover, input[type="submit"]:hover {
+  background: var(--vl-accent-line) !important;
+  color: #d8e8b8 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(138, 154, 107, 0.25);
+}
+.nav-button.stop, button.stop, .btn-danger {
+  background: var(--vl-warn) !important;
+  border-color: #6a5a4a !important;
+  color: #d8c8a8 !important;
+}
+
+/* 表格 */
+table { color: var(--vl-text) !important; }
+th { background: var(--vl-bg-1) !important; color: var(--vl-accent) !important; border-color: var(--vl-line) !important; }
+td { border-color: var(--vl-line-soft) !important; color: var(--vl-text) !important; }
+tr:nth-child(even) td { background: rgba(36, 40, 48, 0.5) !important; }
+tr:hover td { background: var(--vl-accent-bg) !important; }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--vl-bg-0); }
+::-webkit-scrollbar-thumb { background: var(--vl-line); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--vl-accent); }
+
+/* 日志/代码区 */
+pre, code, .log-view, textarea[readonly] {
+  font-family: var(--vl-mono) !important;
+  background: var(--vl-bg-0) !important;
+  color: var(--vl-accent-soft) !important;
+}
+
+/* 状态徽章类 */
+.badge-success, .status-on { color: #7ba05b !important; }
+.badge-warning { color: #d8a860 !important; }
+.badge-danger { color: var(--vl-danger) !important; }
+
+/* 链接 */
+a { color: var(--vl-accent-soft) !important; }
+a:hover { color: var(--vl-accent) !important; }
+
+/* 提示框 */
+.alert, .notice, .message {
+  background: var(--vl-bg-1) !important;
+  border: 1px solid var(--vl-line) !important;
+  border-radius: var(--vl-radius) !important;
+  color: var(--vl-text) !important;
+}
+
+</style>
+
+    <meta name="description" content="WeChatBot帮助文档">
+    <meta name="generator" content="VitePress v1.0.0-rc.31">
+    <link rel="preload stylesheet" href="https://mitay.net/assets/style.FSqn73xO.css" as="style">
+    
+    <script type="text/javascript" charset="UTF-8" async="" src="./files/js-sdk-pro.min.js.下载" id="LA_COLLECT"></script><script type="text/javascript" charset="UTF-8" async="" src="./files/js-sdk-pro.min(1).js.下载" id="LA_COLLECT"></script><script type="text/javascript" charset="UTF-8" async="" src="./files/js-sdk-pro(1).min.下载" id="LA_COLLECT"></script><script type="module" src="./files/app.4SoVDwSK.js.下载"></script>
+    <link rel="preload" href="https://mitay.net/assets/inter-roman-latin.bvIUbFQP.woff2" as="font" type="font/woff2" crossorigin="">
+    <link rel="modulepreload" href="https://mitay.net/assets/chunks/framework.tOnIJ1h2.js">
+    <link rel="modulepreload" href="https://mitay.net/assets/chunks/theme.lCkW0ZIz.js">
+    <link rel="modulepreload" href="https://mitay.net/assets/chunks/md5.wHh-Ch3A.js">
+    <link rel="modulepreload" href="https://mitay.net/assets/chunks/ArticleMetadata.0IfE18zI.js">
+    <link rel="modulepreload" href="https://mitay.net/assets/LeaguePrank.md.c4PNfZaR.lean.js">
+    <link rel="icon" href="">
+    <meta name="author" content="Mitay">
+    <meta name="keywords" content="WeChatBot帮助文档">
+    <meta name="HandheldFriendly" content="True">
+    <meta name="MobileOptimized" content="320">
+    <meta name="theme-color" content="#3c8772">
+    <meta property="og:type" content="website">
+    <meta property="og:locale" content="zh_CN">
+    <meta property="og:title" content="WeChatBot">
+    <meta property="og:description" content="WeChatBot帮助文档">
+    <meta property="og:site" content="">
+    <meta property="og:site_name" content="WeChatBot">
+    <meta property="og:image" content="">
+    <script>(function(c){"use strict";(function(a){var e=window,s=document,o=c,n="".concat(s.location.protocol==="https:"?"https://":"http://","sdk.51.la/js-sdk-pro.min.js"),t=s.createElement("script"),r=s.getElementsByTagName("script")[0];t.type="text/javascript",t.setAttribute("charset","UTF-8"),t.async=!0,t.src=n,t.id="LA_COLLECT",o.d=t;var i=function(){e.LA.ids.push(o)};e.LA?e.LA.ids&&i():(e.LA=c,e.LA.ids=[],i()),r.parentNode.insertBefore(t,r)})()})({id:"KBoRDCfQO4Hd4MXQ",ck:"KBoRDCfQO4Hd4MXQ",autoTrack:!0,hashMode:!0});</script>
+    <script id="check-dark-mode">(()=>{const e=localStorage.getItem("vitepress-theme-appearance")||"auto",a=window.matchMedia("(prefers-color-scheme: dark)").matches;(!e||e==="auto"?a:e==="dark")&&document.documentElement.classList.add("dark")})();</script>
+    <script id="check-mac-os">document.documentElement.classList.toggle("mac",/Mac|iPhone|iPod|iPad/i.test(navigator.platform));</script>
+  <link rel="prefetch" href="https://mitay.net/assets/index.md.mlMY_8eF.js"><link rel="prefetch" href="https://mitay.net/assets/awesome-league.md.T36Q_xe5.js"><link rel="prefetch" href="https://mitay.net/assets/LeagueTavern.md._v4X34bB.js"><link rel="prefetch" href="https://mitay.net/assets/LeagueLobby.md.1pzzqbfZ.js"><link rel="prefetch" href="https://mitay.net/assets/PenguLoader.md.SYwnZqAF.js"><link rel="prefetch" href="https://mitay.net/assets/about.md.zLsyryXE.js"><script id="LA_CODELESS" src="./files/js-sdk-event.min.js.下载" data-la-ev="KBoRDCfQO4Hd4MXQ" crossorigin="anonymous" charset="UTF-8"></script><style>.Po4BvhR1CK2tJaywJ6AN path {
+  fill: var(--icon-path-fill);
+}
+.Oz4yDjua3Qe6thqkZYf_ path {
+  transition: 0.2s all;
+}
+.Oz4yDjua3Qe6thqkZYf_:hover path {
+  fill: var(--icon-hover-fill);
+}
+</style><style>/* ！！！切勿直接改动该文件，该文件由 generator.ts 自动生成！！！ */
+/* !!! DONT MODIFY THIS FILE DIRECTLY, THIS FILE IS GENERATED BY generator.ts AUTOMATICALLY !!! */
+.ibW4Oa5B7s2zJKKZ4pCg {
+  user-select: none;
+}
+.AtqKyJetjrG4smuk35Np {
+  max-width: 346px;
+  width: auto;
+  height: 36px;
+  background-color: var(--quark-style-white-color, #fff);
+  padding-left: 10px;
+  padding-right: 4px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  border: 1px solid var(--quark-style-gray-20-color, rgba(6, 10, 38, 0.12));
+  box-shadow: 0 12px 32px -6px var(--quark-style-gray-30-fixed-color, rgba(6, 10, 38, 0.24));
+  border-radius: 10px;
+}
+.ibW4Oa5B7s2zJKKZ4pCg .g6iGsZa_KHMeW2yICzQQ {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  margin-right: 6px;
+}
+.ibW4Oa5B7s2zJKKZ4pCg .e4UXx38MPgfHdym_Lzt0 {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  height: 28px;
+  padding: 0 6px;
+  margin-right: 2px;
+  border-radius: 6px;
+  column-gap: 4px;
+}
+.ibW4Oa5B7s2zJKKZ4pCg .e4UXx38MPgfHdym_Lzt0:hover:not(.ibW4Oa5B7s2zJKKZ4pCg .kNOcXLDT_cCrcoY8LTm8) {
+  background: var(--quark-style-gray-10-color, rgba(6, 10, 38, 0.06));
+}
+.ibW4Oa5B7s2zJKKZ4pCg .kNOcXLDT_cCrcoY8LTm8 {
+  cursor: default;
+}
+.ibW4Oa5B7s2zJKKZ4pCg .kNOcXLDT_cCrcoY8LTm8 .Va3czASiR9Zztyl_lD4M {
+  color: var(--quark-style-gray-40-color, rgba(6, 10, 38, 0.4)) !important;
+}
+.ibW4Oa5B7s2zJKKZ4pCg .e4UXx38MPgfHdym_Lzt0 .Va3czASiR9Zztyl_lD4M {
+  font-size: 12px;
+  color: var(--quark-style-gray-color, #060A26);
+  line-height: 16px;
+  white-space: nowrap;
+  position: relative;
+}
+.ibW4Oa5B7s2zJKKZ4pCg .llw0qsmiI_08u93bFdNg {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  overflow: visible !important;
+}
+.ibW4Oa5B7s2zJKKZ4pCg .LEo8kpqIERehkv8AhAfG {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  border-radius: 6px;
+  overflow: visible !important;
+}
+.ibW4Oa5B7s2zJKKZ4pCg .LEo8kpqIERehkv8AhAfG:hover {
+  background: var(--quark-style-gray-10-color, rgba(6, 10, 38, 0.06));
+}
+.ibW4Oa5B7s2zJKKZ4pCg .zoNmooxAnbLEJSN8m1Jg {
+  box-sizing: border-box;
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 110px;
+  max-height: 136px;
+  height: auto;
+  top: 36px;
+  right: -5px;
+  padding: 4px 0;
+  background-color: var(--quark-style-white-color, #fff);
+  border: 1px solid var(--quark-style-gray-20-color, rgba(6, 10, 38, 0.12));
+  box-shadow: 0 4px 16px -6px var(--quark-style-gray-20-fixed-color, rgba(6, 10, 38, 0.12));
+  border-radius: 8px;
+  overflow: visible !important;
+  row-gap: 4px;
+}
+.ibW4Oa5B7s2zJKKZ4pCg .O1imPofna4elG_8NcQnR {
+  top: -77px;
+}
+.ibW4Oa5B7s2zJKKZ4pCg .mdH0IY7jS3Swn5vdX6tz {
+  width: 102px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  cursor: pointer;
+  column-gap: 8px;
+  border-radius: 6px;
+  padding: 0 6px;
+  box-sizing: border-box;
+}
+.ibW4Oa5B7s2zJKKZ4pCg .mdH0IY7jS3Swn5vdX6tz:hover:not(.ibW4Oa5B7s2zJKKZ4pCg .dEdHLVmn_L2GAzb_cmwt) {
+  background: var(--quark-style-gray-10-color, rgba(6, 10, 38, 0.06));
+}
+.ibW4Oa5B7s2zJKKZ4pCg .dEdHLVmn_L2GAzb_cmwt {
+  cursor: default;
+}
+.ibW4Oa5B7s2zJKKZ4pCg .dEdHLVmn_L2GAzb_cmwt .zEraruudgjR2MToGu4Kw {
+  color: var(--quark-style-gray-40-color, rgba(6, 10, 38, 0.4)) !important;
+}
+.ibW4Oa5B7s2zJKKZ4pCg .XfCMwvO0DsqFCeyzPYP2 {
+  width: 16px;
+  height: 16px;
+}
+.ibW4Oa5B7s2zJKKZ4pCg .zEraruudgjR2MToGu4Kw {
+  font-size: 12px;
+  color: var(--quark-style-gray-color, #060A26);
+}
+.ibW4Oa5B7s2zJKKZ4pCg .KZeoAuXbMIkWzOT4PcH5 {
+  width: 100%;
+  height: 1px;
+  background: var(--quark-style-gray-10-color, rgba(6, 10, 38, 0.06));
+}
+.ZL32C_XdLL8UQRZ3zObd {
+  display: flex;
+  align-items: center;
+}
+.u5llx7cIQZLdrjP5Vag1 {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 16px;
+  cursor: pointer;
+  margin-right: 12px;
+  background: var(--quark-style-gray-60-color, rgba(6, 10, 38, 0.6));
+}
+.ZL32C_XdLL8UQRZ3zObd .LEo8kpqIERehkv8AhAfG {
+  border-radius: 16px !important;
+  background: var(--quark-style-gray-60-color, rgba(6, 10, 38, 0.6)) !important;
+}
+.ZL32C_XdLL8UQRZ3zObd .zoNmooxAnbLEJSN8m1Jg {
+  right: 0 !important;
+}
+.ZL32C_XdLL8UQRZ3zObd {
+  overflow: visible !important;
+}
+</style></head>
+  
+    <div id="app"><div class="Layout" data-v-13e2e303=""><!--[--><!--]--><!--[--><span tabindex="-1" data-v-af4d07d4=""></span><a href="https://mitay.net/LeaguePrank.html#VPContent" class="VPSkipLink visually-hidden" data-v-af4d07d4=""> Skip to content </a><!--]--><!----><header class="VPNav" data-v-13e2e303="" data-v-3f876ab0=""><div class="VPNavBar" data-v-3f876ab0="" data-v-1616bee6=""><div class="container" data-v-1616bee6=""><div class="title" data-v-1616bee6=""><div class="VPNavBarTitle" data-v-1616bee6="" data-v-10e15f78=""></div></div><div class="content" data-v-1616bee6=""><div class="curtain" data-v-1616bee6=""></div></div></div></div><!----></header><div class="VPLocalNav reached-top" data-v-13e2e303="" data-v-400bf6ee=""><!----><div class="VPLocalNavOutlineDropdown" style="--vp-vh:0px;" data-v-400bf6ee="" data-v-03c39541=""><!----></div></div><!----><div class="VPContent" id="VPContent" data-v-13e2e303="" data-v-a2aa65e8=""><div class="VPDoc has-aside" data-v-a2aa65e8="" data-v-48654f7e=""><!--[--><!--]--><div class="container" data-v-48654f7e=""><div class="content" data-v-48654f7e=""><div class="content-container" data-v-48654f7e=""><!--[--><!--]--><div data-v-ac6b2cf7="" data-v-48654f7e="" class="VPDocOutlineDropdown"><!----></div><main class="main" data-v-48654f7e=""><div style="position:relative;" class="vp-doc _LeaguePrank" data-v-48654f7e=""><div><h1 id="leagueprank" tabindex="-1">Wechat-Bot<a class="header-anchor" aria-label="Permalink to &quot;LeaguePrank&quot;">​</a></h1><!----><p>Hi~&nbsp;o(<em>￣ ▽ ￣</em>)ブ！喵呜，欢迎使用 <code>Wechat-Bot</code>！</p><h2 id="🔝-介绍" tabindex="-1">🔝 介绍 <a class="header-anchor" aria-label="Permalink to &quot;🔝 介绍&quot;">​</a></h2><p><code>WeChat-Bot</code>是由<code>iwyxdxl</code>开发<code>dy阿文睡不醒</code>整理更新的，将deepseek、gpt、gemini等AI大语言模型接入微信实现角色扮演自动聊天的聊天机器人。</p><p>本 fork 版本由 <code>fanyuantaier</code> 维护更新：哔哩哔哩 <a href="https://space.bilibili.com/3493122510162030" target="_blank" rel="noreferrer">@fanyuantaier</a> · GitHub <a href="https://github.com/fanyuantaier" target="_blank" rel="noreferrer">@fanyuantaier</a>。项目地址：<a href="https://github.com/fanyuantaier/wechatbot-new" target="_blank" rel="noreferrer">github.com/fanyuantaier/wechatbot-new</a>（PyPI：<a href="https://pypi.org/project/wechatbot-new/" target="_blank" rel="noreferrer">wechatbot-new</a>）。</p><div class="warning custom-block"><p class="custom-block-title">⚠ 注意</p><p>为了正常与WeChat通讯，<code>WeChatBot</code>现已支持微信 4.1.12 及以上版本运行（底层 wechatauto-replica 已适配 4.1.15.13）</p></div><h2 id="🍦-下载" tabindex="-1">🍦 下载 <a class="header-anchor" aria-label="Permalink to &quot;🍦 下载&quot;">​</a></h2><h3 id="leagueprank-1" tabindex="-1">WechatBot <span class="VPBadge tip" data-v-9db8aa37=""><!--[-->Beta-2.2.6<!--]--></span> <a class="header-anchor" aria-label="Permalink to &quot;LeaguePrank &lt;Badge type=&quot;tip&quot; text=&quot;Beta-2.1.1&quot; /&gt;&quot;">​</a></h3><div class="tip custom-block"><p class="custom-block-title">系统兼容性</p><ul><li><span class="VPBadge tip" data-v-9db8aa37=""><!--[-->支持运行<!--]--></span>的Windows版本：Windows10，Windows11</li><li><span class="VPBadge danger" data-v-9db8aa37=""><!--[-->不支持<!--]--></span>的Windows版本：WindowsXP，Windows7，Windows8，Windows8.1</li><li><code>网吧</code>可能无法保存聊天记忆或无法支持运行<code>网吧</code>有一定记录运行会报错等。</li></ul></div><p>本项目已发布到 PyPI（<code>pip install wechatbot-new</code>），源码、更新日志与问题反馈见 GitHub 仓库：</p><div class="t-space t-space-horizontal" style="gap:24px;"><!--[--><!--[--><div class="t-space-item"><a target="_blank" class="t-button t-button--variant-base t-button--theme-primary t-size-full-width" type="button" href="https://pypi.org/project/wechatbot-new/" tabindex="0"><span class="t-button__text"><!--[--><use href=""></use></svg>PyPI 安装页 <!--]--></span></a></div><!----><!--]--><!--[--><div class="t-space-item"><a target="_blank" class="t-button t-button--variant-base t-button--theme-primary t-size-full-width" type="button" href="https://github.com/fanyuantaier/wechatbot-new" tabindex="0"><span class="t-button__text"><!--[--><svg class="t-icon t-icon-download" style=""><use href="#t-icon-download"></use></svg>GitHub 仓库 <!--]--></span></a></div><!----><!--]--><!--]--></div><p>以后更新都会发布到 PyPI 与 GitHub 仓库。</p><hr><h2 id="🚀-注意事项" tabindex="-1">🚀 注意事项 <a class="header-anchor" aria-label="Permalink to &quot;🚀 注意事项&quot;">​</a></h2><br><div class="t-alert t-alert--error"><div class="t-alert__icon"><svg fill="none" viewBox="0 0 24 24" width="1em" height="1em" class="t-icon t-icon-error-circle-filled" style=""><path fill="currentColor" d="M12 1a11 11 0 110 22 11 11 0 010-22zm-1 13h2V6.5h-2V14zm2 1.5h-2v2h2v-2z"></path></svg></div><div class="t-alert__content"><!----><div class="t-alert__message"><div class="t-alert__description"><!--[-->WeChat小号容易出现封号风险！！！本地和云端均会出现，大号本地部署无风险。<!--]--><!----></div><!----></div></div><!----></div><br><div class="t-space t-space-horizontal" style="gap:16px;"><!--[--><!--[--><div class="t-space-item"></div><!----><!--]--><!--]--></div><hr><h2 id="💰-赞助" tabindex="-1">💰 赞助 </h2><p>哔哩哔哩关注<a href="https://space.bilibili.com/3546972795439778" target="_blank" rel="noreferrer"> 阿文睡不醒i </a>，谢谢喵~你的免费关注就是我们最大的动力！</p><p>本工具Github开源，但原作者已经停止维护，现由<code>阿文睡不醒i</code>维护更新<code>WeChatBot</code>更有动力！</p><p>本 fork 版本由 <code>fanyuantaier</code> 维护更新：哔哩哔哩关注<a href="https://space.bilibili.com/3493122510162030" target="_blank" rel="noreferrer"> fanyuantaier </a>，项目地址 <a href="https://github.com/fanyuantaier/wechatbot-new" target="_blank" rel="noreferrer">github.com/fanyuantaier/wechatbot-new</a>，谢谢喵~你的免费关注就是我们最大的动力！</p><hr><h2 id="♾️-功能介绍" tabindex="-1">♾️ 功能介绍 <a class="header-anchor" aria-label="Permalink to &quot;♾️ 功能介绍&quot;">​</a></h2><p>本工具可以实现WeChat接入AI，实现你的<code>Ai女友</code>功能<code>WeChatBot</code>可以让你在虚拟与现实交织处，予永恒的温柔羁绊，质疑痞老板，理解痞老板，成为痞老板，让你找到记忆中的那个她。</p><h3 id="🎨-搭配使用可实现效果" tabindex="-1">🎨 搭配使用可实现效果 <a class="header-anchor" aria-label="Permalink to &quot;🎨 搭配使用可实现效果&quot;">​</a></h3><p>让你的<code>WeChat</code>功能<code>更加强大</code>实现了：👤 角色扮演，🧠 记忆整理，📥 导入配置，💬 主动消息，😊 表情识别，👋 拍一拍，🛡️ 防撤回，🌈 朋友圈查询，🧬 模仿我的说话风格，📖 按需读上下文等。</p><hr><h3 id="☑️-主动消息" tabindex="-1">☑️ 主动消息 <a class="header-anchor" aria-label="Permalink to &quot;☑️ 主动消息&quot;">​</a><p>还担心<code>他/她</code>消息不回，<code>她/他</code>回消息很慢，语气太差？</p><blockquote><p>此功能可以让AI主动给你发消息，让你感受到爱</p></blockquote><div class="warning custom-block"><p class="custom-block-title">⚠ 注意</p><p><code>要提前设置好喔</code></p><ul><li>可以主动发送各类消息</li><li>可以主动关心你的情况，给你最好的陪伴</li><li>也可以在你休息的时候不去打扰你，在你醒来第一时间发送消息给你</li></ul><p>注意：如果你没有设置，你的AI女友是不会给你主动发送消息，只能被动回，这样是不对的。</p></div><hr><h3 id="☑️-主动发送表情包" tabindex="-1">☑️ 主动发送表情包 <a class="header-anchor" aria-label="Permalink to &quot;☑️ 主动发送表情包&quot;">​</a></h3><p><p>该功能可以让<code>他/她</code>主动发送表情包，<code>她/他</code>回消息宛若真人一般。</p><blockquote><p>注：在安装目录下emojis文件夹内，可以自行添加表情包</p></blockquote><hr><h3 id="☑️-记忆体" tabindex="-1">☑️ 记忆体 <a class="header-anchor" aria-label="Permalink to &quot;☑️ 记忆体&quot;">​</a></h3><p><p>该功能可以使<code>他/她</code>有记忆功能，<code>她/他</code>可以记住和你的每次聊天</p><blockquote><p>可以有记忆功能，不过记忆不建议太长</p></blockquote><div class="warning custom-block"><p class="custom-block-title">⚠ 注意</p><li>AI记忆越长，消耗余额也越大，看自己搭配</li><li>如更新版本或在其他电脑使用，配置文件<code>config.py</code>和记忆体文件<code>chat_contexts.json</code>在根目录下，请自行替换到新版本内</li></div><hr></p><hr><h3 id="☑️-模仿我的说话风格" tabindex="-1">☑️ 模仿我的说话风格 <a class="header-anchor" aria-label="Permalink to &quot;☑️ 模仿我的说话风格&quot;">​</a></h3><p>让 AI 用<b>你自己的说话方式</b>回消息，而不是照 Prompt 演一个角色。</p><blockquote><p>配置页「用户列表」里勾上那一行的 <b>读聊天记录</b>，再点 <b>读取聊天记录</b>；程序会读该会话在本机的聊天记录，让模型提炼出「我」这一方的说话风格与最近聊的事，存成风格档案。</p></blockquote><div class="tip custom-block"><p class="custom-block-title">生效规则</p><ul><li><b>启用后该用户不再使用他原来选的 Prompt 文件</b>（改用风格档案），记忆功能照旧。</li><li>档案存在 <code>HistoryProfiles/&lt;昵称&gt;.md</code>，可以自己在 Prompt 区之外手动改，改完立刻生效。</li><li>聊了一阵觉得档案旧了，再点一次「读取聊天记录」重新生成即可。</li><li><b>生成即启用</b>：档案写成功的同时会把该昵称记入启用名单，不用再手动勾选+保存；机器人正在跑的话，下一条消息起就改用这份档案。要换回 prompt，取消勾选再保存配置即可。</li><li>读多少条、档案最长多少字，在同一面板里可调（默认 60 条 / 3000 字）。</li></ul></div><div class="warning custom-block"><p class="custom-block-title">⚠ 注意</p><ul><li>只读本地微信数据库，不操作微信界面；但<b>聊天记录内容会进入模型上下文</b>（含发给 API 服务商的部分），介意隐私就别开。</li><li>昵称要和微信里显示的完全一致，否则找不到会话；找不到会直接提示，不会瞎编。</li></ul></div><hr><h3 id="☑️-按需读取聊天上下文" tabindex="-1">☑️ 按需读取聊天上下文 <a class="header-anchor" aria-label="Permalink to &quot;☑️ 按需读取聊天上下文&quot;">​</a></h3><p>没有启用风格档案的用户，也可以让机器人「记得你们之前聊过什么」。</p><blockquote><p>在「用户列表」面板底部打开 <b>按需读取聊天上下文</b>（默认关闭）。</p></blockquote><div class="tip custom-block"><p class="custom-block-title">它是怎么省 token 的</p><ul><li>启动时先给每个监听用户<b>预读一次</b>聊天记录做背景。</li><li>之后每条消息先让模型判断「这条需不需要更多上下文」，<b>判要的时候才重新读库</b>（拿到的是此刻最新的记录）。</li><li>判不需要就一次库都不多读；开了风格档案的用户自动跳过，不会叠两份。</li><li><b>群聊也读得到</b>：监听列表里填群名即可（以前按群名搜不到会话，群的上下文一直是空的）。读不到时日志会点名说「读不到聊天记录」并附上解析到的会话，不会再静默。</li><li>每次判断会多一次模型调用（有配辅助模型时用辅助模型），注入的背景也占 token，所以默认关。</li></ul></div><hr><h3 id="☑️-自定义模型与获取可用模型" tabindex="-1">☑️ 自定义模型与获取可用模型 <a class="header-anchor" aria-label="Permalink to &quot;☑️ 自定义模型与获取可用模型&quot;">​</a></h3><p>Chat / 辅助 / 识图 / 联网四个模型区都加了 <b>获取可用模型</b> 按钮：按你填的 API 地址和 Key 直接问接口有哪些模型，填进下拉框选就行。</p><div class="tip custom-block"><p class="custom-block-title">注意</p><ul><li>消息类型的识别已重整：表情、视频号卡片、红包、位置、合并转发都折成一行可读文本，不再把整段 XML 交给模型；卡片里的微信资源地址（<code>stodownload</code> 一类）不会被当成网页链接去抓。</li><li>有些服务商的 <code>/models</code> 接口不提供鉴权后的完整列表，拉不到就直接提示返回内容，此时手填模型名即可（选「其它」）。</li><li>拉取失败不会影响已保存的配置；拉取列表也不会自动改配置，需要你点保存。</li></ul></div><hr><h3 id="☑️-防撤回" tabindex="-1">☑️ 防撤回 <a class="header-anchor" aria-label="Permalink to &quot;☑️ 防撤回&quot;">​</a></h3><p>对方撤回消息后，机器人仍然能看到被撤回的原文。</p><div class="tip custom-block"><p class="custom-block-title">能做什么</p><ul><li>在聊天里发 <code>/撤回</code>（或 <code>/rc</code>）：当前会话最近 5 条撤回记录，带被撤回的原文。</li><li><code>/撤回 10</code>：临时指定条数（最多 50）。</li><li><code>/撤回统计</code>（或 <code>/rcs</code>）：本会话一共被撤回多少次、谁最常撤回、最近一次是什么时候。</li><li><b>撤回提醒</b>（配置页可开，默认关）：发现新的撤回时，机器人主动往那个会话发一条提醒并把原文带上。</li><li>配置页还能调：启动时回填的历史条数、撤回扫描间隔、每轮重读条数。</li></ul></div><div class="warning custom-block"><p class="custom-block-title">⚠ 注意</p><ul><li>只覆盖「用户列表」里正在监听的会话；<b>开启之前</b>已经被撤回的救不回来（指令里会写明「原文没救回来」）。</li><li>镜像与媒体备份放在 <code>~/Documents/wechatauto_recall/</code>，媒体备份不会自动清理。</li><li>「撤回提醒」会真的往会话里发消息，介意就别开。</li></ul></div><hr><h3 id="☑️-朋友圈查询" tabindex="-1">☑️ 朋友圈查询 <a class="header-anchor" aria-label="Permalink to &quot;☑️ 朋友圈查询&quot;">​</a></h3><p>聊天里的人可以让机器人念朋友圈，也能知道谁赞了、评论了自己。</p><div class="tip custom-block"><p class="custom-block-title">能做什么</p><ul><li><code>/朋友圈</code>（或 <code>/pyq</code>）：发指令者最近 N 条动态 —— 时间、正文摘要、图/视频/赞/评论数量。</li><li><code>/朋友圈 老王</code>：看指定昵称或备注的人最近动态；<code>/朋友圈 10</code>：临时指定条数。</li><li><code>/朋友圈互动</code>（或 <code>/pyqi</code>）：谁赞了、谁评论了你的朋友圈（配置页可开，默认关）。</li><li><b>朋友圈监听</b>（配置页可开，默认关）：监听对象发了新动态时，机器人下次跟对方聊天会知道这件事。</li></ul></div><div class="warning custom-block"><p class="custom-block-title">⚠ 注意</p><ul><li>这些都只读本机 <code>sns.db</code>、不打开朋友圈界面；只能读到已经同步到本机的动态。</li><li>可见范围以本机微信权限为准：三天可见、分组可见、屏蔽都不会被绕过。</li><li>点赞和评论只给数量、不给文字（微信画在自绘区域里，抓不到文本）。</li></ul></div><h2 id="❓-常见问题" tabindex="-1">❓ 常见问题 <a class="header-anchor" aria-label="Permalink to &quot;❓ 常见问题&quot;">​</a></h2><h3 id="WeChatBot打不开" tabindex="-1"><code>WeChatBot</code>启动报错 <a class="header-anchor" aria-label="Permalink to &quot;`WeChatBot`打不开&quot;">​</a></h3><blockquote><ul><li>尝试<code>不以管理员身份运行</code>桌面快捷方式《启动机器人》</li><li>你的系统版本过低或精简阉割了<code>支持的</code>环境</li><li><a noreferrer">更换网络环境或者重启之后</a>后再次启动<code>WeChatBot</code></li></ul></blockquote><h3 id="leagueprank找不到游戏账户" tabindex="-1"><code>Python</code>未安装或启动报错 </h3><blockquote><ul><li><p>完全卸载<code>Python</code>重新安装。</li><li>安装时将<code>python</code>添加进系统<code>path</code></li><li><code>网吧</code>可能无法安装<code>Python</code>更换网吧或者在家使用。</li><li><p>安装<code>Python</code>重新选择其他盘符安装。</li><li>启动器已不再限制 Python 版本（3.9–3.12 的旧限制已移除），但部分定制依赖包是按 Python 3.9–3.12 提供的，建议仍用这个范围。</li></ul></blockquote><hr><h2 id="⚠️-免责声明" tabindex="-1">⚠️ 免责声明 <a class="header-anchor" aria-label="Permalink to &quot;⚠️ 免责声明&quot;">​</a></h2><div class="danger custom-block"><p class="custom-block-title">⚠ 注意</p><p>凡本软件提供的所有资源的版权，均归其版权所有人所有。用户若因本软件导致的任何法律争议及后果，均由用户自己负责，本软件不负任何责任。使用此软件即代表用户已知晓以上内容。</p></div></div></div></main><footer class="VPDocFooter" data-v-48654f7e="" data-v-c0b7c93f=""><!--[--><!--[--><!--[--><!--[--><!----><!--]--><!--]--><!--]--><!--]--><!----><!----></footer><!--[--><!--]--></div></div></div><!--[--><!--]--></div></div><!----><!--[--><!--]--></div></div>

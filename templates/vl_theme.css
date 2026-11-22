@@ -1,0 +1,145 @@
+/* ============================================================
+   Virtual Life 设计系统 · WeChatBot WebUI 全局换肤
+   统一注入到 5 个页面 <head> 顶部（覆盖原浅色默认样式）
+   ============================================================ */
+:root {
+  --vl-bg-0: #1a1d24;         /* 页面底 */
+  --vl-bg-1: #242830;         /* 卡片 */
+  --vl-bg-2: #1a1d24;         /* 输入/更深 */
+  --vl-line: #383e4c;         /* 边框 */
+  --vl-line-soft: #2e3340;
+  --vl-text: #d8d4c8;         /* 正文暖白 */
+  --vl-text-bright: #e8e4d8;  /* 标题 */
+  --vl-text-dim: #777d8a;     /* 次要 */
+  --vl-accent: #8a9a6b;       /* 主色 苔绿 */
+  --vl-accent-soft: #a3c48c;
+  --vl-accent-bg: #3a4a2e;
+  --vl-accent-line: #4a5a3a;
+  --vl-warn: #5a4a3a;
+  --vl-danger: #ff6b6b;
+  --vl-radius: 10px;
+  --vl-font: "PingFang SC", "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif;
+  --vl-mono: "Cascadia Code", Consolas, monospace;
+}
+
+/* 全局底色与字体 */
+body {
+  background: linear-gradient(160deg, var(--vl-bg-0), #242830) !important;
+  color: var(--vl-text) !important;
+  font-family: var(--vl-font) !important;
+}
+
+/* 顶栏 */
+.header-bar {
+  background: rgba(26, 29, 36, 0.92) !important;
+  border-bottom: 1px solid var(--vl-line) !important;
+  box-shadow: 0 1px 0 rgba(138, 154, 107, 0.15) !important;
+  backdrop-filter: blur(8px);
+}
+.header-bar .header-title h1, h1 { color: var(--vl-text-bright) !important; }
+h1, h2, h3 { color: var(--vl-text-bright) !important; font-family: var(--vl-font) !important; }
+h2 {
+  border-bottom: 1px solid var(--vl-line-soft) !important;
+  letter-spacing: 1px !important;
+}
+h3 { color: var(--vl-accent) !important; }
+
+/* 侧栏 */
+.sidebar {
+  background: var(--vl-bg-1) !important;
+  border-right: 1px solid var(--vl-line) !important;
+}
+.sidebar li a {
+  color: var(--vl-text) !important;
+  border-radius: 8px !important;
+  margin: 2px 8px !important;
+  transition: all 0.2s !important;
+}
+.sidebar li a:hover { background: var(--vl-accent-bg) !important; color: var(--vl-accent-soft) !important; }
+.sidebar li a.active {
+  background: var(--vl-accent-bg) !important;
+  color: var(--vl-accent-soft) !important;
+  border-left: 3px solid var(--vl-accent) !important;
+}
+#mobileMenuToggle { background: var(--vl-accent) !important; }
+#mobileMenuToggle:hover { background: var(--vl-accent-line) !important; }
+#sidebarOverlay { background: rgba(0,0,0,0.5) !important; }
+
+/* 主内容容器与卡片 */
+.content, .main-content, section, .card, .form-section {
+  background: transparent !important;
+}
+input, select, textarea {
+  background: var(--vl-bg-2) !important;
+  border: 1px solid var(--vl-line) !important;
+  color: var(--vl-text) !important;
+  border-radius: 8px !important;
+  font-family: var(--vl-font) !important;
+  transition: border-color 0.2s, box-shadow 0.2s !important;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none !important;
+  border-color: var(--vl-accent) !important;
+  box-shadow: 0 0 0 2px rgba(138, 154, 107, 0.25) !important;
+}
+input::placeholder, textarea::placeholder { color: var(--vl-text-dim) !important; }
+label { color: var(--vl-text) !important; }
+small, .help-text, .description { color: var(--vl-text-dim) !important; }
+
+/* 按钮 */
+button, .nav-button, a.nav-button, input[type="submit"] {
+  background: var(--vl-accent-bg) !important;
+  border: 1px solid var(--vl-accent-line) !important;
+  color: #c8d8a8 !important;
+  border-radius: 8px !important;
+  font-family: var(--vl-font) !important;
+  transition: all 0.2s !important;
+}
+button:hover, .nav-button:hover, a.nav-button:hover, input[type="submit"]:hover {
+  background: var(--vl-accent-line) !important;
+  color: #d8e8b8 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(138, 154, 107, 0.25);
+}
+.nav-button.stop, button.stop, .btn-danger {
+  background: var(--vl-warn) !important;
+  border-color: #6a5a4a !important;
+  color: #d8c8a8 !important;
+}
+
+/* 表格 */
+table { color: var(--vl-text) !important; }
+th { background: var(--vl-bg-1) !important; color: var(--vl-accent) !important; border-color: var(--vl-line) !important; }
+td { border-color: var(--vl-line-soft) !important; color: var(--vl-text) !important; }
+tr:nth-child(even) td { background: rgba(36, 40, 48, 0.5) !important; }
+tr:hover td { background: var(--vl-accent-bg) !important; }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--vl-bg-0); }
+::-webkit-scrollbar-thumb { background: var(--vl-line); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--vl-accent); }
+
+/* 日志/代码区 */
+pre, code, .log-view, textarea[readonly] {
+  font-family: var(--vl-mono) !important;
+  background: var(--vl-bg-0) !important;
+  color: var(--vl-accent-soft) !important;
+}
+
+/* 状态徽章类 */
+.badge-success, .status-on { color: #7ba05b !important; }
+.badge-warning { color: #d8a860 !important; }
+.badge-danger { color: var(--vl-danger) !important; }
+
+/* 链接 */
+a { color: var(--vl-accent-soft) !important; }
+a:hover { color: var(--vl-accent) !important; }
+
+/* 提示框 */
+.alert, .notice, .message {
+  background: var(--vl-bg-1) !important;
+  border: 1px solid var(--vl-line) !important;
+  border-radius: var(--vl-radius) !important;
+  color: var(--vl-text) !important;
+}
