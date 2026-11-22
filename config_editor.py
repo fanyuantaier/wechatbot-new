@@ -3719,6 +3719,14 @@ def kill_process_using_port(port):
                 except Exception as e:
                     print(f"结束进程 {conn.pid} 时出现异常：{e}")
 
+# ==== Virtual Life 记忆库（检索式记忆 + 上帝之手）====
+try:
+    from vl_memory_routes import register_memory_routes
+    register_memory_routes(app)
+except Exception as _vl_err:
+    print(f"[VL] 记忆路由注册失败（不影响主功能）: {_vl_err}")
+
+
 if __name__ == '__main__':
     # 配置应用日志级别
     app.logger.setLevel(logging.INFO)
@@ -3799,3 +3807,5 @@ if __name__ == '__main__':
     #host = "0.0.0.0" if config.get('ENABLE_LOGIN_PASSWORD', False) else "127.0.0.1"
     app.run(host= "127.0.0.1", debug=False, port=PORT)
     
+
+    print(f"[VL] 记忆路由注册失败（不影响主功能）: {_vl_err}")

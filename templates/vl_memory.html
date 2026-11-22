@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Life 记忆库</title>
+<style>
+  :root {
+    --vl-bg-0: #1a1d24; --vl-bg-1: #242830; --vl-bg-2: #1a1d24;
+    --vl-line: #383e4c; --vl-line-soft: #2e3340;
+    --vl-text: #d8d4c8; --vl-text-bright: #e8e4d8; --vl-text-dim: #777d8a;
+    --vl-accent: #8a9a6b; --vl-accent-soft: #a3c48c;
+    --vl-accent-bg: #3a4a2e; --vl-accent-line: #4a5a3a;
+    --vl-warn: #5a4a3a; --vl-danger: #ff6b6b;
+    --vl-font: "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: linear-gradient(160deg, var(--vl-bg-0), #242830);
+    color: var(--vl-text); font-family: var(--vl-font); min-height: 100vh;
+  }
+  header { padding: 18px 28px; border-bottom: 1px solid var(--vl-line);
+           display: flex; align-items: center; gap: 16px;
+           background: rgba(26,29,36,0.92); position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 18px; color: var(--vl-text-bright); }
+  header a { color: var(--vl-accent-soft); text-decoration: none; font-size: 13px; }
+  header .brand { font-size: 11px; color: var(--vl-text-dim); border: 1px solid var(--vl-line);
+                  padding: 3px 8px; border-radius: 10px; }
+  .grid { display: grid; grid-template-columns: 340px 1fr; gap: 18px; padding: 22px; max-width: 1400px; margin: 0 auto; }
+  .card { background: var(--vl-bg-1); border: 1px solid var(--vl-line); border-radius: 12px; padding: 18px; }
+  .card h2 { font-size: 14px; color: var(--vl-accent); margin-bottom: 12px; letter-spacing: 1px; }
+  .user-item { padding: 10px 12px; border: 1px solid var(--vl-line-soft); border-radius: 8px;
+               margin-bottom: 8px; cursor: pointer; transition: all 0.2s; }
+  .user-item:hover { border-color: var(--vl-accent); background: var(--vl-accent-bg); }
+  .user-item.active { border-color: var(--vl-accent); background: var(--vl-accent-bg); }
+  .user-item .name { color: var(--vl-text-bright); font-size: 14px; }
+  .user-item .meta { font-size: 11px; color: var(--vl-text-dim); margin-top: 4px; }
+  .num { font-size: 24px; color: var(--vl-text-bright); font-weight: bold; }
+  .search-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  input, textarea { flex: 1; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--vl-line);
+                    background: var(--vl-bg-2); color: var(--vl-text); font-family: var(--vl-font); font-size: 13px; }
+  input:focus, textarea:focus { outline: none; border-color: var(--vl-accent); box-shadow: 0 0 0 2px rgba(138,154,107,0.25); }
+  button { padding: 9px 16px; border-radius: 8px; border: 1px solid var(--vl-accent-line);
+           background: var(--vl-accent-bg); color: #c8d8a8; cursor: pointer; font-family: var(--vl-font);
+           font-size: 13px; transition: all 0.2s; }
+  button:hover { background: var(--vl-accent-line); transform: translateY(-1px); }
+  button.danger { background: var(--vl-warn); border-color: #6a5a4a; color: #d8c8a8; }
+  .hit { border: 1px solid var(--vl-line-soft); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+  .hit .meta { font-size: 11px; color: var(--vl-text-dim); margin-bottom: 4px; }
+  .hit .text { font-size: 13px; line-height: 1.5; }
+  .ret-keep { color: #7ba05b; } .ret-blur { color: #d8a860; } .ret-lost { color: var(--vl-danger); }
+  .hit-actions { margin-top: 6px; display: flex; gap: 8px; }
+  .hit-actions button { padding: 4px 10px; font-size: 11px; }
+  .empty { color: var(--vl-text-dim); font-size: 13px; padding: 20px; text-align: center; }
+  .add-row textarea { min-height: 60px; margin-bottom: 8px; width: 100%; resize: vertical; }
+  .imp-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .imp-row label { font-size: 12px; color: var(--vl-text-dim); }
+  .imp-row input { width: 70px; }
+  #toast { position: fixed; bottom: 24px; right: 24px; background: var(--vl-accent-bg);
+           color: var(--vl-accent-soft); padding: 12px 20px; border-radius: 10px;
+           border: 1px solid var(--vl-accent-line); display: none; font-size: 13px; z-index: 99; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Virtual Life 记忆库</h1>
+  <span class="brand">WeChatBot × virtual-life 记忆引擎</span>
+  <span style="flex:1"></span>
+  <a href="/">← 配置编辑器</a>
+</header>
+<div class="grid">
+  <div>
+    <div class="card" style="margin-bottom:18px">
+      <h2>记忆库用户</h2>
+      <div id="userList"><div class="empty">加载中…</div></div>
+    </div>
+    <div class="card">
+      <h2>上帝之手 · 写入记忆</h2>
+      <div class="add-row">
+        <textarea id="addText" placeholder="写入一条 key3 终身记忆（她会永远记得这件事）…"></textarea>
+        <div class="imp-row">
+          <label>重要度 1-10</label>
+          <input type="number" id="addImp" value="8" min="1" max="10">
+        </div>
+        <button class="danger" style="width:100%" onclick="addMemory()">写入终身记忆</button>
+      </div>
+    </div>
+  </div>
+  <div>
+    <div class="card">
+      <h2>记忆检索 <span id="curUser" style="color:var(--vl-text-dim);font-size:12px"></span></h2>
+      <div class="search-row">
+        <input id="query" placeholder="检索她的记忆：人物 / 事件 / 关键词…" onkeydown="if(event.key==='Enter')doSearch()">
+        <button onclick="doSearch()">检索</button>
+        <button onclick="loadAll()">全部管理</button>
+      </div>
+      <div id="results"><div class="empty">选择左侧用户后检索</div></div>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<script>
+let curDb = '';
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.display = 'block';
+  setTimeout(() => t.style.display = 'none', 2200);
+}
+function loadUsers() {
+  fetch('/vl_memory/api/list').then(r=>r.json()).then(d=>{
+    const el = document.getElementById('userList');
+    if (!d.users.length) { el.innerHTML = '<div class="empty">还没有记忆库——和 bot 聊过天就有了</div>'; return; }
+    el.innerHTML = d.users.map(u =>
+      `<div class="user-item" data-db="${u.db}" onclick="pickUser('${u.db}','${u.user}')">
+         <div class="name">${u.user}</div>
+         <div class="meta">${u.total} 节点 · 终身 ${u.key3} · 最近 ${u.last}</div>
+       </div>`).join('');
+    if (d.users.length) pickUser(d.users[0].db, d.users[0].user);
+  });
+}
+function pickUser(db, user) {
+  curDb = db;
+  document.getElementById('curUser').textContent = '· ' + user;
+  document.querySelectorAll('.user-item').forEach(e=>e.classList.toggle('active', e.dataset.db===db));
+}
+function doSearch() {
+  const q = document.getElementById('query').value.trim();
+  if (!q || !curDb) return;
+  fetch('/vl_memory/api/search', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({db: curDb, query: q})}).then(r=>r.json()).then(d=>{
+    const el = document.getElementById('results');
+    if (d.error) { el.innerHTML = `<div class="empty">${d.error}</div>`; return; }
+    if (!d.hits.length) { el.innerHTML = '<div class="empty">没有命中——这段记忆还没发生</div>'; return; }
+    el.innerHTML = d.hits.map(h=>{
+      const cls = h.retention >= 0.8 ? 'ret-keep' : (h.retention >= 0.5 ? 'ret-blur' : 'ret-lost');
+      const tag = h.retention < 0.5 ? '（有点模糊）' : '';
+      return `<div class="hit"><div class="meta">[${h.kind}] 保留度 <span class="${cls}">${h.retention}</span></div>
+              <div class="text">${tag}${h.text}</div>
+              <div class="hit-actions"><button class="danger" onclick="delMemory(${h.id||0},'${h.text.slice(0,20)}')">删除</button></div></div>`;
+    }).join('');
+  });
+}
+function loadAll() {
+  if (!curDb) return;
+  fetch('/vl_memory/api/all?db=' + encodeURIComponent(curDb)).then(r=>r.json()).then(d=>{
+    const el = document.getElementById('results');
+    if (d.error) { el.innerHTML = `<div class="empty">${d.error}</div>`; return; }
+    el.innerHTML = d.items.map(it =>
+      `<div class="hit"><div class="meta">[${it.kind}] id=${it.id} · 重要度 ${it.importance} · key${it.key} · 被检索 ${it.access} 次</div>
+       <div class="text">${it.text}</div>
+       <div class="hit-actions"><button class="danger" onclick="delMemory(${it.id})">删除</button></div></div>`).join('');
+  });
+}
+function delMemory(id) {
+  if (!id || !confirm('删除这条记忆？她会真的忘掉这件事。')) return;
+  fetch('/vl_memory/api/delete', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({db: curDb, id: id})}).then(r=>r.json()).then(d=>{
+      toast(d.ok ? '已删除（她忘了）' : (d.error||'失败'));
+      loadAll();
+  });
+}
+function addMemory() {
+  const text = document.getElementById('addText').value.trim();
+  const imp = parseFloat(document.getElementById('addImp').value || 8);
+  if (!text || !curDb) { toast('先选用户再写'); return; }
+  fetch('/vl_memory/api/add', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({db: curDb, text: text, importance: imp})}).then(r=>r.json()).then(d=>{
+      toast(d.ok ? '已写入终身记忆' : (d.error||'失败'));
+      document.getElementById('addText').value = '';
+      loadAll();
+  });
+}
+loadUsers();
+</script>
+</body>
+</html>
