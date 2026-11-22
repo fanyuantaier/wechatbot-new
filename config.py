@@ -12,14 +12,14 @@
 
 # 用户列表(请配置要和bot说话的账号的微信昵称！)
 # 例如：LISTEN_LIST = [['微信名1', '角色1'],['微信名2', '角色2']]
-LISTEN_LIST = [['你的微信昵称', '角色1']]
+LISTEN_LIST = [['微信名1', '角色1']]
 
-# 本机 empero（Qwen3.8-35B-A3B-Distill IQ3_M）：llama.cpp Vulkan llama-server 直连
-# 服务不是开机常驻，重启或异常后要先把 11440 拉起来（见 bot 侧 README 备注 / oc_matrix.load）
-DEEPSEEK_API_KEY = 'local35b'
-DEEPSEEK_BASE_URL = 'http://127.0.0.1:11440/v1'
-# 这里填任意标签都行：llama.cpp 不校验 model 字段。若用严格客户端，/v1/models 返回的 id 是权重文件全路径
-MODEL = 'empero-35b'
+# DeepSeek API 配置
+DEEPSEEK_API_KEY = 'public'
+# 硅基流动API注册地址，免费15元额度 https://cloud.siliconflow.cn/i/Dlavkw5R
+DEEPSEEK_BASE_URL = 'https://opencode.ai/zen/v1'
+# 硅基流动API的模型
+MODEL = 'space-bunny-free'
 # 用户和AI对话轮数
 MAX_GROUPS = 5
 
@@ -28,21 +28,19 @@ MAX_GROUPS = 5
 # 官方API的V3模型
 # MODEL = 'deepseek-chat'
 
-# 回复最大token。empero 是开思考的模型，思考也计入这个额度：2026-10-01 实测 Nex（同族）在 8192 下
-# 有一跳把 50,968 字符全花在思考上、正文为 0；给到 16384 且服务端 -c 65536 才彻底不再空白。
-# 所以这里不能按旧远程模型的 2000 用。
-MAX_TOKEN = 8192
+# 回复最大token
+MAX_TOKEN = 2000
 # DeepSeek温度
 TEMPERATURE = 0.7
 
-# Moonshot AI配置（用于图片和表情包识别）
-# API申请https://platform.moonshot.cn/
-MOONSHOT_API_KEY = 'local35b'
-# 本机 empero 带视觉：同一个 llama-server（:11440）启动时挂了 mmproj-Qwen3.8-35B-A3B-F16.gguf，
-# 服务端日志已确认 "loaded multimodal model"。注意 bot.py 是往 f"{BASE}/chat/completions" 发的，
-# 所以这里必须带上 /v1。实测：普通图片 18.0s、表情包提示词 38.2s，图里四字埋点 4/4 全读回。
-MOONSHOT_BASE_URL = 'http://127.0.0.1:11440/v1'
-MOONSHOT_MODEL = 'empero-35b'
+# 图片/表情包识别的 API 配置（Web UI 里选服务商：月之暗面 / DeepSeek官方 / WeAPIs / 其它）
+# DeepSeek 官方已支持图片输入，用同一套字段即可：
+#   MOONSHOT_BASE_URL = 'https://api.deepseek.com'
+#   MOONSHOT_MODEL = 'deepseek-flash'
+#   下面这个 API Key 填 DeepSeek 官方 Key（与 Chat 的 DEEPSEEK_API_KEY 可以不同）
+MOONSHOT_API_KEY = 'public'
+MOONSHOT_BASE_URL = 'https://opencode.ai/zen/v1'
+MOONSHOT_MODEL = 'space-bunny-free'
 MOONSHOT_TEMPERATURE = 0.5
 ENABLE_IMAGE_RECOGNITION = True
 ENABLE_EMOJI_RECOGNITION = True
@@ -88,11 +86,33 @@ UPLOAD_MEMORY_TO_AI = True
 SAVE_MEMORY_TO_SEPARATE_FILE = True
 CORE_MEMORY_DIR = 'CoreMemory'
 
+# ===== 聊天记录风格模仿 与 上下文读取 =====
+# 名单里的用户：不再使用他的 Prompt 文件，改用「读取聊天记录」生成的风格档案
+# （保存在 HistoryProfiles/<昵称>.md，在配置页的用户列表里勾选并生成）
+HISTORY_STYLE_USERS = []
+# 风格档案目录（相对程序根目录）
+HISTORY_PROFILE_DIR = 'HistoryProfiles'
+# 生成档案时读最近多少条聊天记录
+HISTORY_READ_LIMIT = 60
+# 用哪个模型生成风格档案；留空 = 用「Chat 模型配置」里的 MODEL。
+# API 地址与 Key 仍沿用 Chat 模型那一套（只换模型名）
+HISTORY_PROFILE_MODEL = ''
+# 风格档案最长多少字符（超出截断，避免吃光上下文）
+HISTORY_PROFILE_MAX_CHARS = 3000
+
+# 未启用风格档案的用户：启动时先预读一次聊天记录做背景，
+# 之后由模型判断这条消息是否需要更多上下文，需要时再重新读一次
+ENABLE_CONTEXT_FETCH = True
+# 每次读取最近多少条消息
+CONTEXT_MESSAGE_LIMIT = 30
+# 注入的背景文本上限（字符）
+CONTEXT_MAX_CHARS = 2500
+
 # 是否接收全部群聊消息
 ACCEPT_ALL_GROUP_CHAT_MESSAGES = False
 ENABLE_GROUP_AT_REPLY = True
 ENABLE_GROUP_KEYWORD_REPLY = True
-GROUP_KEYWORD_LIST = ['樊伊航', '机器人', '人机']
+GROUP_KEYWORD_LIST = ['机器人', '人机']
 GROUP_CHAT_RESPONSE_PROBABILITY = 0
 GROUP_KEYWORD_REPLY_IGNORE_PROBABILITY = True
 
@@ -115,25 +135,36 @@ ALLOW_REMINDERS_IN_QUIET_TIME = True
 # 群聊无法使用语音通话进行提醒
 USE_VOICE_CALL_FOR_REMINDERS = True
 
+# 防撤回：挂载后把监听会话的消息镜像到本地（只读微信库 + 写自己的镜像目录，
+# 不驱动界面），对方撤回后用 /撤回 指令可以看到原文。镜像目录见
+# ~/Documents/wechatauto_recall
+ENABLE_RECALL_GUARD = True
+# 启动时把每个会话最近多少条历史消息补进镜像（0 = 不补）
+RECALL_BACKFILL = 50
+# 撤回轮询间隔（秒）
+RECALL_SCAN_INTERVAL = 2.0
+# 每会话每轮重读最近多少条消息用于比对
+RECALL_SCAN_LIMIT = 30
+# 发现新的撤回时，由机器人往那个会话发一条提醒（含原文）。会主动发消息，默认关
+ENABLE_RECALL_NOTICE = False
+
+# 文本指令 /朋友圈（或 /pyq）：查看发指令者（或指定昵称）最近的朋友圈动态
+# 读本地 sns.db，不打开微信界面
+ENABLE_MOMENTS_COMMAND = True
+# /朋友圈 每次返回的条数（也可在指令后面直接跟数字，如「/朋友圈 10」）
+MOMENTS_QUERY_LIMIT = 5
+# /朋友圈互动（或 /pyqi）：查询「谁赞了/评论了你的朋友圈」。含账号社交信息，默认关
+ENABLE_MOMENTS_INTERACTIONS = False
+# 朋友圈监听：轮询监听对象的新动态，等对方下次发消息时随上下文告知模型
+ENABLE_MOMENTS_WATCH = False
+# 朋友圈监听轮询间隔（秒，最小 30）
+MOMENTS_WATCH_INTERVAL = 120
+
 # 联网API配置
-# 主模型换成本机 empero 后，"联网"改成两步：bot.py 的取证层抓材料（免 key，本机实测可达的
-# cn.bing.com 与 wttr.in），作答仍由本机 empero 做。ONLINE_API_KEY / ONLINE_BASE_URL / ONLINE_MODEL
-# 这三项已经不再被调用（保留仅为兼容配置编辑器界面），所以留空也能用。
-# 代价：一条需要联网的消息要多排两次队（检测 + 作答，服务端 --parallel 1），实测各 9-13 秒。
 ENABLE_ONLINE_API = True
-ONLINE_SEARCH_TOP_N = 3
-# 关键词预筛：False 则每条消息都过一次"要不要联网"的大模型检测（实测 8.7-20.4 秒/条）
-ENABLE_ONLINE_PREFILTER = True
-# 命中任意一个词才去做检测；漏判就往这里加词
-ONLINE_PREFILTER_WORDS = (
-    "天气", "气温", "温度", "多少度", "下雨", "下雪", "新闻", "热搜", "最新", "最近", "刚刚",
-    "现在", "此刻", "几点", "今天", "明天", "后天", "这周", "本周", "今年", "去年",
-    "股价", "股票", "汇率", "油价", "票价", "价格", "多少钱", "比分", "赛果", "榜单",
-    "查一下", "查查", "帮我查", "搜一下", "搜索", "是不是真的", "什么时候", "多少人来着",
-)
-ONLINE_BASE_URL = 'https://vg.v1api.cc/v1'
-ONLINE_MODEL = 'deepseek-r1-searching'
-ONLINE_API_KEY = 'YOUR_API_KEY'
+ONLINE_BASE_URL = 'https://opencode.ai/zen/v1'
+ONLINE_MODEL = 'space-bunny-free'
+ONLINE_API_KEY = 'public'
 ONLINE_API_TEMPERATURE = 0.5
 ONLINE_API_MAX_TOKEN = 2000
 SEARCH_DETECTION_PROMPT = '是否需要查询今天的天气、最新的新闻事件、特定网站的内容、股票价格、特定人物的最新动态、歌词、小说情节、游戏内容、网络热梗、历史信息等'
@@ -159,14 +190,11 @@ RESTART_INACTIVITY_MINUTES = 15
 REMOVE_PARENTHESES = False
 
 # 是否使用辅助模型
-# 关掉的原因：辅助模型那几项还指向远程网关且 key 是占位符，开着会在"记忆摘要"这一步反复失败；
-# 关掉后摘要改由主模型（本机 empero）做，代码里所有分支都带 and ENABLE_ASSISTANT_MODEL 保护，安全。
-# 想要快又省，这一项最适合放本机 4B（Qwen3-4B-Instruct-2507，2.55 GB，短输入 prefill 实测 368 t/s）。
-ENABLE_ASSISTANT_MODEL = False
-ASSISTANT_BASE_URL = 'https://vg.v1api.cc/v1'
-ASSISTANT_MODEL = 'gpt-4o-mini'
-ASSISTANT_API_KEY = 'YOUR_API_KEY'
-ASSISTANT_TEMPERATURE = 0.3
+ENABLE_ASSISTANT_MODEL = True
+ASSISTANT_BASE_URL = 'https://opencode.ai/zen/v1'
+ASSISTANT_MODEL = 'space-bunny-free'
+ASSISTANT_API_KEY = 'public'
+ASSISTANT_TEMPERATURE = 0.2
 ASSISTANT_MAX_TOKEN = 1000
 USE_ASSISTANT_FOR_MEMORY_SUMMARY = True
 
