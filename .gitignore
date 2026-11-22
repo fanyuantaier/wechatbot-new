@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+Memory_Temp/
+CoreMemory/
+chat_contexts.json
+logs/
+data/
+emojis/
+forum_data/
+templates/
+libs/
+Demo_Image/
+Run.exe

@@ -1,0 +1,19 @@
+# ==================== 微信自动化核心库 ====================
+# 导入名为 wechatauto（发布名 wechatauto-replica）。guia 扩展提供
+# 「坐标+OCR」发送（GUI 操作，依赖 winsdk / pypinyin），wxbot.py 用到的
+# wechatauto.wx 会引入 guia。
+wechatauto-replica[guia]>=1.0.4
+
+# ==================== Web UI ====================
+flask
+werkzeug
+
+# ==================== AI / LLM ====================
+openai==1.84.0
+
+# ==================== 自动化与系统工具 ====================
+psutil
+filelock
+requests
+beautifulsoup4
+lxml
