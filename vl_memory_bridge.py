@@ -5,7 +5,6 @@
 """
 from __future__ import annotations
 
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +12,9 @@ from pathlib import Path
 VL_ROOT = Path(r"D:\.zcode\workspace\draft-f3e4a1ee-5b90-4231-8256-94a1d1b43a52\virtual-life")
 sys.path.insert(0, str(VL_ROOT))
 sys.path.insert(0, str(VL_ROOT / "memory"))
-os.chdir(VL_ROOT)
+# 注意：绝不 os.chdir(VL_ROOT)——宿主 bot.py 的相对路径（Memory_Temp 等）依赖原 cwd。
+# store.py 的 db_path 由下方 get_store 显式传绝对路径，不依赖工作目录。
+# embedding 端点走 config_local.json（store.py 内部按其自身 BASE_DIR 解析，也不受 cwd 影响）。
 
 from store import MemoryStore           # noqa: E402
 
