@@ -23,6 +23,7 @@ import random
 from typing import Optional
 import shutil
 import re
+import ast
 from config import *
 import queue
 import json
@@ -33,15 +34,19 @@ import os
 import ctypes
 os.environ["PROJECT_NAME"] = 'iwyxdxl/WeChatBot_WXAUTO_SE'
 # 消息收发由 wxbot 兼容层驱动（wechatauto，适配微信 4.x 自绘渲染）
-from wxbot import WeChat
+from wxbot import (WeChat, is_wechat_asset_url, sanitize_history_profile,
+                   dedupe_repeated_parts, acquire_instance_lock,
+                   release_instance_lock)
 from wechatauto.param import WxParam
 WxParam.ENABLE_FILE_LOGGER = False
 WxParam.FORCE_MESSAGE_XBIAS = True
 
 
 # 生成用户昵称列表和prompt映射字典
+# 用了风格档案的用户可以不给 Prompt 文件，LISTEN_LIST 里那格会是空串；
+# 记忆文件名一类的地方都取 prompt_mapping，这里统一退回昵称，免得生出 '用户_.md'。
 user_names = [entry[0] for entry in LISTEN_LIST]
-prompt_mapping = {entry[0]: entry[1] for entry in LISTEN_LIST}
+prompt_mapping = {entry[0]: (entry[1] or entry[0]) for entry in LISTEN_LIST}
 
 # 编码检测和处理辅助函数
 def safe_read_file_with_encoding(file_path, fallback_content=""):
@@ -147,15 +152,31 @@ def get_dynamic_config(key, default_value=None):
             elif value_str.replace('.', '').isdigit():
                 return float(value_str)
             else:
-                # 尝试eval（注意：在生产环境中需要更安全的方法）
+                # 以前这里是 eval()：config.py 里写什么就会被执行什么。
+                # literal_eval 只认字面量（列表/字典/字符串/数字/True/False/None），
+                # 认不出来的走下面去引号那条兜底。
                 try:
-                    return eval(value_str)
-                except:
+                    return ast.literal_eval(value_str)
+                except Exception:
                     return value_str.strip("'\"")
         return default_value
     except Exception as e:
         logger.warning(f"获取动态配置 {key} 失败: {e}")
         return default_value
+
+def _cfg_int(key, default):
+    """取整数配置：配置编辑器会把数字存成字符串，取不出来就退回默认值。"""
+    try:
+        return int(get_dynamic_config(key, default))
+    except (TypeError, ValueError):
+        return default
+
+def _cfg_float(key, default):
+    """取浮点配置，容错同 _cfg_int。"""
+    try:
+        return float(get_dynamic_config(key, default))
+    except (TypeError, ValueError):
+        return default
 
 # 用户消息队列和聊天上下文管理
 user_queues = {}  # {user_id: {'messages': [], 'last_message_time': 时间戳, ...}}
@@ -428,6 +449,35 @@ console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
+# --- 单实例锁：同一目录只允许一个 bot ---
+# 两个实例各连一份监听库，每条消息会被各回一遍（用户看到的就是「重复说两遍」）。
+# 锁由系统在进程退出时释放；重启（os.execv）前会先主动放锁。
+_BOT_BASE_DIR = (os.path.dirname(os.path.abspath(sys.executable))
+                 if getattr(sys, "frozen", False)
+                 else os.path.dirname(os.path.abspath(__file__)))
+_INSTANCE_LOCK_PATH = os.path.join(_BOT_BASE_DIR, ".bot_instance.lock")
+instance_lock = None
+
+
+def _acquire_instance_lock_or_exit():
+    global instance_lock
+    instance_lock, status = acquire_instance_lock(_INSTANCE_LOCK_PATH)
+    if status == "busy":
+        logger.error("\033[31m同一目录下已有一个机器人进程在运行，本进程退出。"
+                     "同时跑两个实例会让每条消息各回一遍。\033[0m")
+        sys.exit(1)
+    if status.startswith("error:"):
+        logger.warning(f"实例锁不可用（{status[6:]}），跳过重复实例检查")
+
+
+def _release_instance_lock():
+    global instance_lock
+    release_instance_lock(instance_lock)
+    instance_lock = None
+
+
+_acquire_instance_lock_or_exit()
+
 # 获取微信窗口对象
 try:
     logger.info("\033[32m正在初始化微信接口...\033[0m")
@@ -471,6 +521,10 @@ is_sending_message = False
 # 用于拍一拍功能的全局变量
 user_last_msg = {}  # {user_id: msg对象} 存储每个用户最后发送的消息对象
 bot_last_sent_msg = {}  # {user_id: wx.GetLastMessage()} 存储机器人发送给每个用户的最后一条消息
+
+# 朋友圈监听攒下的「对方刚发了新动态」，等下次聊天时随消息一起给模型
+moment_notes = {}  # {显示名: [提示文本, ...]}，每个会话最多留最近 3 条
+moment_notes_lock = threading.Lock()
 
 # --- 定时重启相关全局变量 ---
 program_start_time = 0.0 # 程序启动时间戳
@@ -707,8 +761,198 @@ def on_user_message(user):
         user_names.append(user)
     reset_user_timer(user)
 
+# ==================== 聊天记录风格模仿（替代该用户的 Prompt）====================
+
+def history_users():
+    """勾选了「读聊天记录」的用户名单（每次读配置，改完重启即生效）。"""
+    users = get_dynamic_config('HISTORY_STYLE_USERS', [])
+    return list(users) if isinstance(users, (list, tuple)) else []
+
+
+def get_history_profile_path(user_id):
+    """风格档案的存放路径：HistoryProfiles/<昵称>.md（昵称里的非法字符替掉）。"""
+    folder = get_dynamic_config('HISTORY_PROFILE_DIR', 'HistoryProfiles') or 'HistoryProfiles'
+    safe = re.sub(r'[\\/:*?"<>|]', '_', str(user_id))
+    return os.path.join(root_dir, str(folder), f'{safe}.md')
+
+
+def get_history_profile(user_id):
+    """返回该用户的风格档案文本；没启用或还没生成档案时返回 None（继续用普通 prompt）。"""
+    if not user_id or user_id not in history_users():
+        return None
+    path = get_history_profile_path(user_id)
+    if not os.path.exists(path):
+        logger.warning(f"用户 {user_id} 开了「读聊天记录」但还没有档案，先用原 prompt；"
+                       f"请在配置页点「读取聊天记录」生成：{path}")
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            text = f.read().strip()
+        if text:
+            logger.debug(f"用户 {user_id} 使用聊天记录风格档案（{len(text)} 字）")
+            # 老档案里可能写着「偶尔回同一句话刷几遍」——那是从发送重试留下的
+            # 重复记录里学来的假风格，直接用会让 AI 真的复读。
+            return sanitize_history_profile(text)
+    except Exception as e:
+        logger.error(f"读取风格档案失败 {user_id}: {e}")
+    return None
+
+
+def get_history_profile_info(user_id):
+    """档案的生成时间，供日志和「是否过期」判断用；没有档案返回 0。"""
+    meta = get_history_profile_path(user_id) + '.meta'
+    try:
+        with open(meta, 'r', encoding='utf-8') as f:
+            return int(float(f.read().strip() or 0))
+    except Exception:
+        return 0
+
+
+# ==================== 按需读取聊天记录上下文 ====================
+
+history_contexts = {}          # {user_id: 最近聊天记录文本}
+history_context_injected = set()  # 已用过预读背景的会话（首条消息注入一次）
+history_context_lock = threading.Lock()
+history_context_warned = set()  # 「读不到记录」只在每个会话说一次，别刷屏
+
+
+def read_history_context(user_id, force=False):
+    """取该用户的聊天记录背景。
+
+    启动时预读一次放进缓存（``force=False`` 直接用缓存）；模型判断「需要上下文」
+    时传 ``force=True`` 重新读库，拿到的是此刻最新的记录。
+    """
+    if not user_id:
+        return ""
+    with history_context_lock:
+        cached = history_contexts.get(user_id, "")
+    if cached and not force:
+        return cached
+    _uname, text = wx.GetHistoryText(
+        user_id,
+        limit=_cfg_int('CONTEXT_MESSAGE_LIMIT', 30),
+        max_chars=_cfg_int('CONTEXT_MAX_CHARS', 2500))
+    if not text:
+        with history_context_lock:
+            first_time = user_id not in history_context_warned
+            if first_time:
+                history_context_warned.add(user_id)
+        if first_time:
+            logger.warning(
+                f"用户 {user_id} 读不到聊天记录（解析到的会话={_uname or '无'}）。"
+                f"常见原因：LISTEN_LIST 里的昵称和微信显示名不完全一致，或这个会话本地确实没有记录。"
+                f"之后同一条会话不再重复提醒。")
+        return cached
+    with history_context_lock:
+        history_contexts[user_id] = text
+    return text
+
+
+def preload_history_contexts():
+    """启动时给监听用户各预读一次聊天记录（开了风格档案的跳过）。"""
+    users = [u for u in list(user_names) if u not in history_users()]
+    if not users:
+        logger.info("没有需要预读聊天记录的用户。")
+        return
+    ok = 0
+    for user in users:
+        try:
+            if read_history_context(user):
+                ok += 1
+        except Exception as e:
+            logger.warning(f"预读聊天记录失败 {user}: {e}")
+        time.sleep(0.2)  # 别把读库打成尖峰
+    logger.info(f"聊天记录背景预读完成：{ok}/{len(users)} 个会话有内容。")
+
+
+def detect_need_history_context(message, user_id):
+    """让模型判断这条消息需不需要更多历史聊天记录才能接得上。
+
+    跟联网检测一个套路：开了辅助模型就用辅助模型，否则用主模型；只在
+    ENABLE_CONTEXT_FETCH 为真时被调用。
+    """
+    detection_prompt = f"""
+请判断以下用户消息是否需要参考你们之前的聊天聊天记录才能正确理解（例如：消息里出现「那个/上次/继续/之前说的」这类指代，或者在追问一件没交代背景的事）。
+用户消息："{message[:500]}"
+
+如果需要参考聊天记录，请只回答 "需要上下文"；
+如果不需要（例如：自我介绍、独立的问题、不需要前文的闲聊），请只回答 "不需要上下文"。
+不要添加任何其他解释。
+"""
+    try:
+        if get_dynamic_config('ENABLE_ASSISTANT_MODEL', ENABLE_ASSISTANT_MODEL):
+            response = get_assistant_response(detection_prompt, f"context_detection_{user_id}")
+        else:
+            response = get_deepseek_response(detection_prompt, user_id=f"context_detection_{user_id}",
+                                             store_context=False)
+        cleaned = (response or "").strip()
+        if "</think>" in cleaned:
+            cleaned = cleaned.split("</think>", 1)[1].strip()
+        need = ("需要上下文" in cleaned) and ("不需要上下文" not in cleaned)
+        logger.info(f"聊天记录上下文检测 - 用户 {user_id}: {cleaned[:20]} -> "
+                    f"{'需要' if need else '不需要'}")
+        return need
+    except Exception as e:
+        logger.error(f"聊天记录上下文检测失败 {user_id}: {e}")
+        return False
+
+
+def history_context_block(user_id, force=False):
+    """拼好可直接作为 system 消息注入的背景文本；没有内容时返回空串。"""
+    text = read_history_context(user_id, force=force)
+    if not text:
+        return ""
+    return ("以下是你们在本地的最近聊天记录（按时间正序，「我」是本机微信账号这一方），"
+            "用来说清来龙去脉，不要逐句复述：\n" + text)
+
+
+def inject_history_context(messages_to_send, user_id, message):
+    """按需把聊天记录背景塞进这次请求（ENABLE_CONTEXT_FETCH 开着才生效）。
+
+    首条消息用启动时预读的那份；之后每条先让模型判断「需不需要上下文」，
+    判要的时候才重新读库（拿到的是此刻最新的记录）。开了风格档案的用户跳过
+    ——档案本身就是从聊天记录生成的，再叠一份纯属浪费 token。
+    """
+    if not get_dynamic_config('ENABLE_CONTEXT_FETCH', False):
+        return
+    if user_id in history_users():
+        return
+    with history_context_lock:
+        first_turn = user_id not in history_context_injected
+        if first_turn:
+            history_context_injected.add(user_id)
+    if not first_turn and not detect_need_history_context(message, user_id):
+        return
+    block = history_context_block(user_id, force=not first_turn)
+    if not block:
+        return
+    # 合并进首条 system，不要新开第二条：本地模型（llama.cpp / ollama）的 GGUF
+    # chat template 里有 {% if message['role']=='system' and not loop.first %}
+    # raise_exception('System message must be at the beginning.')，非首位的 system
+    # 会让整次请求直接 500。合并是安全的 —— messages_to_send 每次调用都重建，
+    # 档案文本也每次现取，不会逐轮累积。
+    if messages_to_send and messages_to_send[0].get('role') == 'system':
+        messages_to_send[0]['content'] = f"{messages_to_send[0]['content']}\n\n{block}"
+    else:
+        messages_to_send.insert(0, {"role": "system", "content": block})
+    logger.info(f"为用户 {user_id} 注入聊天记录背景（{len(block)} 字，"
+                f"{'预读' if first_turn else '按需重读'}）")
+
+
+# 所有 system prompt 末尾都加这一条：档案/聊天记录里出现的「同一句连发」是从
+# 故障记录里学来的，不能让模型把它当风格；正常 prompt 也一并受益。
+_NO_REPEAT_RULE = ("\n\n【输出要求】每条回复里同一句话只说一遍；不要原样重复上一句，"
+                   "也不要把相同内容拆成多条连发。")
+
+
 # 修改get_user_prompt函数
 def get_user_prompt(user_id):
+    # 启用了「聊天记录风格模仿」的用户：用生成的风格档案替代他的 prompt 文件，
+    # 记忆仍按原来的规则合并进去（不然开了档案就丢记忆了）。
+    profile = get_history_profile(user_id)
+    if profile:
+        return _apply_memory_to_prompt(user_id, profile) + _NO_REPEAT_RULE
+
     # 查找映射中的文件名，若不存在则使用user_id
     prompt_file = prompt_mapping.get(user_id, user_id)
     prompt_path = os.path.join(root_dir, 'prompts', f'{prompt_file}.md')
@@ -754,7 +998,12 @@ def get_user_prompt(user_id):
     
     if prompt_content is None:
         raise FileNotFoundError(f"无法读取Prompt文件内容: {prompt_path}")
-    
+
+    return _apply_memory_to_prompt(user_id, prompt_content) + _NO_REPEAT_RULE
+
+
+def _apply_memory_to_prompt(user_id, prompt_content):
+    """把记忆并到提示词里。普通 prompt 文件和聊天记录风格档案共用这套规则。"""
     # 处理记忆的上传
     if not get_dynamic_config('UPLOAD_MEMORY_TO_AI', UPLOAD_MEMORY_TO_AI):
         # 如果不上传记忆到AI，则移除所有记忆片段
@@ -885,7 +1134,6 @@ def get_deepseek_response(message, user_id, store_context=True, is_summary=False
                     retrieval_block = render_memories_block(user_id, message, top_k=5)
                     if retrieval_block:
                         marker = "## 记忆片段"
-                        # 移除旧记忆片段（全量版），换成检索版
                         if marker in user_prompt:
                             head = user_prompt.split(marker, 1)[0].rstrip()
                             user_prompt = head + "\n\n" + retrieval_block
@@ -893,11 +1141,14 @@ def get_deepseek_response(message, user_id, store_context=True, is_summary=False
                             user_prompt = user_prompt + "\n\n" + retrieval_block
                         logger.debug(f"已为 {user_id} 注入检索式记忆（top5）")
                 except Exception as _mem_err:
-                    logger.warning(f"记忆桥接失败（不影响主流程，退回全量记忆）: {_mem_err}")
+                    logger.warning(f"记忆桥接失败（退回全量记忆，不影响主流程）: {_mem_err}")
                 messages_to_send.append({"role": "system", "content": user_prompt})
             except FileNotFoundError as e:
                 logger.error(f"用户 {user_id} 的提示文件错误: {e}，使用默认提示。")
                 messages_to_send.append({"role": "system", "content": "你是一个乐于助人的助手。"})
+
+            # 按需注入聊天记录背景（ENABLE_CONTEXT_FETCH；开了风格档案的用户会自动跳过）
+            inject_history_context(messages_to_send, user_id, message)
 
             # 2. 管理并检索聊天历史记录
             with queue_lock: # 确保对 chat_contexts 的访问是线程安全的
@@ -983,6 +1234,7 @@ def call_chat_api_with_retry(messages_to_send, user_id, max_retries=2, is_summar
         raise RuntimeError("抱歉，您所使用的API服务商不受信任，请联系网站管理员")
 
     attempt = 0
+    last_error = ""
     while attempt <= max_retries:
         try:
             logger.debug(f"发送给 API 的消息 (ID: {user_id}): {messages_to_send}")
@@ -1026,6 +1278,7 @@ def call_chat_api_with_retry(messages_to_send, user_id, max_retries=2, is_summar
             logger.error(f"错误请求消息体: {MODEL}")
             logger.error(json.dumps(messages_to_send, ensure_ascii=False, indent=2))
             error_info = str(e)
+            last_error = error_info
             logger.error(f"自动重试：第 {attempt + 1} 次调用 {MODEL}失败 (ID: {user_id}) 原因: {error_info}", exc_info=False)
 
             # 细化错误分类
@@ -1056,7 +1309,10 @@ def call_chat_api_with_retry(messages_to_send, user_id, max_retries=2, is_summar
 
         attempt += 1
 
-    raise RuntimeError("阿文提示：api余额不足")
+    # 以前这里不分原因一律报「api余额不足」：超时、上下文超长、本地代码抛错
+    # 都会被当成"你去充值"。现在把最后一次真实原因带出去（没抛过异常就是返回空）。
+    raise RuntimeError("阿文提示：调用 %s 失败（第 %d 次尝试后放弃）：%s"
+                       % (MODEL, attempt, last_error or "模型连续返回空内容，见上方日志"))
 
 def get_assistant_response(message, user_id, is_summary=False):
     """
@@ -1221,6 +1477,102 @@ def keep_alive():
         # 等待指定间隔后再进行下一次检查
         time.sleep(check_interval)
 
+# ==================== 防撤回：新撤回提醒 ====================
+
+def recall_notice_loop():
+    """轮询撤回记录，把新出现的撤回发一条提醒进那个会话（ENABLE_RECALL_NOTICE）。
+
+    只认「镜像里留过原文」的撤回（底层只记这种），首轮只建立水位，
+    不会把历史记录翻出来重发一遍。
+    """
+    seen_id = None
+    while True:
+        try:
+            events = wx.GetRecalled(limit=20)
+            newest = max((e.get("id") or 0 for e in events), default=0)
+            if seen_id is None:
+                seen_id = newest
+                logger.info(f"撤回提醒已就绪，当前水位 id={seen_id}")
+            elif newest > seen_id:
+                for ev in sorted(events, key=lambda x: x.get("id") or 0):
+                    if (ev.get("id") or 0) <= seen_id:
+                        continue
+                    chat = ev.get("chat")
+                    if not chat:
+                        continue
+                    original = (ev.get("original_content") or "").strip()
+                    who = ev.get("revoker") or "有人"
+                    text = (f"[撤回提醒] {who} 撤回了一条消息，原文：{original[:200]}"
+                            if original else
+                            f"[撤回提醒] {who} 撤回了一条消息（原文没救回来）")
+                    logger.info(f"撤回提醒 -> {chat}: {who} / {original[:40]}")
+                    send_reply(chat, chat, chat, "[撤回提醒]", text, is_system_message=True)
+                seen_id = newest
+        except Exception as e:
+            logger.error(f"撤回提醒线程异常: {e}", exc_info=True)
+        time.sleep(5)
+
+
+# ==================== 朋友圈：新动态监听 ====================
+
+def _record_moment_feeds(feeds, nick_of=None):
+    """把「监听对象发了新动态」记成待注入的提示，返回记录条数。
+
+    args:
+        feeds: wx.GetNewMoments() 返回的动态列表。
+        nick_of: wxid -> 显示名；默认用 wx.GetNickname，测试时可替换。
+    """
+    recorded = 0
+    for feed in feeds or []:
+        author = str(feed.get("username") or feed.get("tid") or "")
+        name = (nick_of or wx.GetNickname)(author) if author else ""
+        if not name or name not in user_names:
+            continue
+        text = (feed.get("text") or "").strip().replace("\n", " ")
+        extra = []
+        if feed.get("images"):
+            extra.append(f"{len(feed['images'])}图")
+        if feed.get("videos"):
+            extra.append(f"{len(feed['videos'])}视频")
+        note = f"[朋友圈动态] {name} 刚发了新动态：{text[:60] or '（无正文）'}"
+        if extra:
+            note += f"（{'/'.join(extra)}）"
+        with moment_notes_lock:
+            notes = moment_notes.setdefault(name, [])
+            notes.append(note)
+            moment_notes[name] = notes[-3:]
+        recorded += 1
+    return recorded
+
+
+def _take_moment_notes(who):
+    """取走并清空某个会话待注入的朋友圈提示。"""
+    if not who:
+        return []
+    with moment_notes_lock:
+        return moment_notes.pop(who, [])
+
+
+def moment_watch_loop():
+    """轮询朋友圈增量，把监听对象的新动态攒起来（ENABLE_MOMENTS_WATCH）。
+
+    纯读本地 sns.db，不打开朋友圈界面；首轮只建立水位、不记录。
+    """
+    since = None
+    while True:
+        try:
+            feeds, latest = wx.GetNewMoments(since)
+            if since is not None and latest is not None:
+                got = _record_moment_feeds(feeds)
+                if got:
+                    logger.info(f"朋友圈监听：记录 {got} 条新动态")
+            if latest is not None:
+                since = latest
+        except Exception as e:
+            logger.error(f"朋友圈监听线程异常: {e}", exc_info=True)
+        time.sleep(max(30, _cfg_int("MOMENTS_WATCH_INTERVAL", 120)))
+
+
 def message_listener(msg, chat):
     global can_send_messages
     who = chat.who 
@@ -1248,7 +1600,15 @@ def message_listener(msg, chat):
 
     if msgtype == 'voice':
         voicetext = msg.to_text()
-        original_content = (f"[语音消息]: {voicetext}")
+        # 语音取不到文字是常态（兼容层不做语音转文字），但「为什么没有」有分别：
+        # 微信没把音频落盘 vs 库/索引读不到。附一句说明，别让模型以为用户没说话。
+        voice_note = ''
+        try:
+            voice_note = msg.voice_note()
+        except Exception as voice_err:
+            logger.debug(f"语音可用性查询失败: {voice_err}")
+        suffix = f"（{voice_note}）" if voice_note else ""
+        original_content = (f"[语音消息]: {voicetext}{suffix}")
     
     if msgtype == 'link':
         cardurl = msg.get_url()
@@ -1285,7 +1645,7 @@ def message_listener(msg, chat):
                                 # 保存当前状态
                                 original_can_send_messages = can_send_messages
                                 # 处理图片
-                                content = recognize_image_with_moonshot(image_path, is_emoji=False)
+                                content = recognize_image(image_path, is_emoji=False)
                                 if content:
                                     logger.info(f"图片识别成功: {content}")
                                     content = f"[图片识别结果]: {content}"
@@ -1308,7 +1668,7 @@ def message_listener(msg, chat):
                                 # 保存当前状态
                                 original_can_send_messages = can_send_messages
                                 # 处理图片
-                                image_content = recognize_image_with_moonshot(content, is_emoji=False)
+                                image_content = recognize_image(content, is_emoji=False)
                                 if image_content:
                                     logger.info(f"图片识别成功: {image_content}")
                                     content = f"[图片识别结果]: {image_content}"
@@ -1408,6 +1768,8 @@ def message_listener(msg, chat):
             if not msgtype == 'image':
                 content_for_handler = f"[群聊消息-来自群'{who}'-发送者:{sender}]:{processed_group_content}"
             else:
+                # 图片的内容稍后会被识别结果整个替换掉，前缀在这儿加没用；
+                # 发送者改在 handle_wxauto_message 识别完成后再补（见那里）。
                 content_for_handler = processed_group_content
             
             if not content_for_handler and at_triggered and not keyword_triggered: 
@@ -1432,12 +1794,21 @@ def message_listener(msg, chat):
         else:
             handle_wxauto_message(msg, who)
 
-def recognize_image_with_moonshot(image_path, is_emoji=False):
+LLM_HTTP_TIMEOUT = 180   # 识图这类多模态调用比抓网页慢得多，不能复用 REQUESTS_TIMEOUT(10s)；
+                         # requests 不传 timeout 是"永远等"，一个不响应的端点会挂死这个线程
+
+
+def recognize_image(image_path, is_emoji=False):
+    """调 OpenAI 兼容的视觉接口识别图片/表情包，返回描述文本。
+
+    接口地址/模型/Key 都取「图片与表情包识别配置」里的那一组（config.py 里的
+    MOONSHOT_* 字段）：月之暗面、WeAPIs、DeepSeek 官方（api.deepseek.com +
+    deepseek-flash）都走同一个请求体格式，换服务商不用改代码。
+    """
     # 先暂停向API发送消息队列
     global can_send_messages
     can_send_messages = False
 
-    """使用AI识别图片内容并返回文本"""
     try:
 
         processed_image_path = image_path
@@ -1445,7 +1816,13 @@ def recognize_image_with_moonshot(image_path, is_emoji=False):
         # 读取图片内容并编码
         with open(processed_image_path, 'rb') as img_file:
             image_content = base64.b64encode(img_file.read()).decode('utf-8')
-            
+
+        # 按扩展名给 MIME：DeepSeek 官方会按声明的格式校验，统一报 jpeg 有被拒的风险
+        ext = os.path.splitext(str(processed_image_path))[1].lower()
+        image_mime = {
+            '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
+        }.get(ext, 'image/jpeg')
+
         headers = {
             'Authorization': f'Bearer {MOONSHOT_API_KEY}',
             'Content-Type': 'application/json'
@@ -1457,7 +1834,7 @@ def recognize_image_with_moonshot(image_path, is_emoji=False):
                 {
                     "role": "user",
                     "content": [
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_content}"}},
+                        {"type": "image_url", "image_url": {"url": f"data:{image_mime};base64,{image_content}"}},
                         {"type": "text", "text": text_prompt}
                     ]
                 }
@@ -1465,7 +1842,12 @@ def recognize_image_with_moonshot(image_path, is_emoji=False):
             "temperature": MOONSHOT_TEMPERATURE
         }
         
-        response = requests.post(f"{MOONSHOT_BASE_URL}/chat/completions", headers=headers, json=data)
+        response = requests.post(f"{MOONSHOT_BASE_URL}/chat/completions", headers=headers,
+                                 json=data, timeout=LLM_HTTP_TIMEOUT)
+        if response.status_code != 200:
+            # 换服务商时最容易踩请求体不合规（例如图片没放在 user 消息里），
+            # raise_for_status 的异常不带响应体，这里把服务端原文打出来
+            logger.error(f"识图接口返回 {response.status_code}: {response.text[:300]}")
         response.raise_for_status()
         result = response.json()
         recognized_text = result['choices'][0]['message']['content']
@@ -1603,7 +1985,7 @@ def fetch_and_extract_text(url: str) -> Optional[str]:
 def log_user_message_to_memory(username, original_content):
     """将用户的原始消息记录到记忆日志文件。"""
     if ENABLE_MEMORY:
-        # === virtual-life 记忆桥接：同时写入检索式记忆库（key=1 普通，失败静默） ===
+        # === virtual-life 记忆桥接：同时写入检索式记忆库（失败静默，不影响主流程） ===
         try:
             from vl_memory_bridge import remember as vl_remember
             vl_remember(username, f"用户说：{original_content}", kind="chat",
@@ -1654,24 +2036,39 @@ def _extract_command_from_text(raw_text: str) -> Optional[str]:
         return None
 
 def _update_config_boolean(key: str, value: bool) -> bool:
-    """在 config.py 中更新布尔配置，同时更新内存变量。失败返回 False。"""
+    """在 config.py 中更新布尔配置，同时更新内存变量。失败返回 False。
+
+    锁路径和配置编辑器用的是同一个 ``config.py.lock``：以前这里是第二个写者、
+    不上锁，网页端正在保存时机器人改开关会互相覆盖。
+    """
+    try:
+        from filelock import FileLock
+    except ImportError:
+        logger.error("缺少 filelock，拒绝改写 config.py（会和配置编辑器抢写）")
+        return False
     try:
         config_path = os.path.join(root_dir, 'config.py')
         if not os.path.exists(config_path):
             logger.error(f"配置文件不存在: {config_path}")
             return False
-        with open(config_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        pattern = rf"^({re.escape(key)})\s*=\s*(True|False|.+)$"
         replacement = f"{key} = {str(bool(value))}"
-        new_content, count = re.subn(pattern, replacement, content, flags=re.M)
-        if count == 0:
-            # 若不存在该项，则追加
-            new_content = content.rstrip("\n") + f"\n\n{replacement}\n"
-        tmp_path = config_path + '.tmp'
-        with open(tmp_path, 'w', encoding='utf-8') as f:
-            f.write(new_content)
-        shutil.move(tmp_path, config_path)
+        with FileLock(config_path + '.lock'):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            # 只认 True/False 两种现值。以前带 `|.+$`：键的值要是写成跨行的列表，
+            # 它只替换第一行、把续行留下，config.py 当场变语法错误。
+            new_content, count = re.subn(
+                rf"^({re.escape(key)})\s*=\s*(True|False)$", replacement, content, count=1,
+                flags=re.M)
+            if count == 0:
+                if re.search(rf"^{re.escape(key)}\s*=", content, re.M):
+                    logger.error(f"config.py 里 {key} 的现值不是 True/False，拒绝改写")
+                    return False
+                new_content = content.rstrip("\n") + f"\n\n{replacement}\n"
+            tmp_path = config_path + '.tmp'
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            shutil.move(tmp_path, config_path)
         # 同步到内存
         try:
             globals()[key] = bool(value)
@@ -1700,12 +2097,20 @@ def _schedule_restart(reason: str = "指令触发"):
                 except Exception:
                     pass
             logger.info(f"正在执行重启 (原因: {reason}) ...")
-            os.execv(sys.executable, ['python'] + sys.argv)
+            # execv 在 Windows 上是「起新进程 + 退旧进程」，不放锁的话新进程
+            # 会把自己当成重复实例直接退出。
+            _release_instance_lock()
+            try:
+                os.execv(sys.executable, ['python'] + sys.argv)
+            except Exception:
+                _acquire_instance_lock_or_exit()
+                raise
         except Exception as e:
             logger.error(f"执行重启失败: {e}", exc_info=True)
     threading.Timer(1.5, _do_restart).start()
 
-def _handle_text_command_if_any(original_content: str, user_id: str) -> bool:
+def _handle_text_command_if_any(original_content: str, user_id: str,
+                               sender_wxid: str = None) -> bool:
     """
     如检测到命令则执行并回复用户，返回 True 表示已处理并阻止后续流程。
     支持的命令：
@@ -1715,7 +2120,12 @@ def _handle_text_command_if_any(original_content: str, user_id: str) -> bool:
     /清除临时记忆 或 /cl - 清除当前聊天的临时上下文与记忆
     /允许语音通话 或 /ev - 允许使用语音通话提醒
     /禁止语音通话 或 /dv - 禁止使用语音通话提醒
+    /撤回 或 /rc - 查看当前会话最近被撤回的消息（含原文，需开启防撤回）
+    /朋友圈 或 /pyq - 查看当前会话对象最近的朋友圈动态
     /总结 或 /ms - 立即进行一次临时记忆总结成记忆片段
+
+    sender_wxid: 消息发送者的真 wxid（群聊里用来区分是谁发的；单聊可省略）。
+                 只有 /朋友圈 用它 —— 群里 who 是群名，按群名查不到任何动态。
     """
     try:
         # 动态检查文本命令开关
@@ -1726,6 +2136,9 @@ def _handle_text_command_if_any(original_content: str, user_id: str) -> bool:
             return False
 
         normalized = cmd.strip().replace('：', ':')
+        # 指令名与参数（形如「/撤回 10」「/朋友圈 老王」），下面按 cmd_name 分支
+        cmd_name = normalized.split()[0] if normalized else ''
+        cmd_arg = normalized[len(cmd_name):].strip()
         reply_text = None
 
         if normalized == '/重启' or normalized == '/re':
@@ -1775,6 +2188,112 @@ def _handle_text_command_if_any(original_content: str, user_id: str) -> bool:
             send_reply(user_id, user_id, user_id, command_label, reply_text, is_system_message=True)
             return True
 
+        if cmd_name in ('/撤回', '/rc', '/撤回统计', '/rcs'):
+            is_stat = cmd_name in ('/撤回统计', '/rcs')
+            command_label = '[命令]' + cmd_name
+            # 参数：条数（默认 5，最多 50）；统计模式固定看最近 500 条
+            limit = 500 if is_stat else 5
+            if not is_stat and cmd_arg.isdigit():
+                limit = max(1, min(50, int(cmd_arg)))
+            try:
+                events = wx.GetRecalled(chat=user_id, limit=limit)
+            except Exception as e:
+                logger.error(f"查询撤回记录失败: {e}")
+                events = []
+            if not events:
+                reply_text = '没有记录到撤回消息（防撤回未开启，或撤回发生在监听开始之前）。'
+            elif is_stat:
+                counter = {}
+                for ev in events:
+                    who = ev.get('revoker') or '未知'
+                    counter[who] = counter.get(who, 0) + 1
+                top = sorted(counter.items(), key=lambda kv: -kv[1])[:3]
+                latest = max((ev.get('revoke_time') or 0) for ev in events)
+                reply_text = ('本会话共记录 %d 次撤回（统计最近 %d 条记录）：\n' % (len(events), limit)
+                              + '\n'.join('%s：%d 次' % (k, v) for k, v in top)
+                              + '\n最近一次：' + time.strftime('%m-%d %H:%M', time.localtime(latest)))
+            else:
+                lines = []
+                for ev in events:
+                    when = time.strftime(
+                        '%m-%d %H:%M', time.localtime(ev.get('revoke_time') or 0))
+                    revoker = ev.get('revoker') or '有人'
+                    original = (ev.get('original_content') or '').strip() or '（原文没救回来）'
+                    lines.append(f"{when} {revoker} 撤回了：{original[:120]}")
+                reply_text = '最近 %d 条撤回：\n' % len(events) + '\n'.join(lines)
+            send_reply(user_id, user_id, user_id, command_label, reply_text, is_system_message=True)
+            return True
+
+        if cmd_name in ('/朋友圈互动', '/pyqi'):
+            command_label = '[命令]' + cmd_name
+            if not get_dynamic_config('ENABLE_MOMENTS_INTERACTIONS', False):
+                reply_text = ('朋友圈互动查询已关闭（配置项 ENABLE_MOMENTS_INTERACTIONS）；'
+                              '开启后可以查询「谁赞了/评论了你的朋友圈」。')
+            else:
+                try:
+                    items = wx.GetMomentInteractions(
+                        only_unread=False, limit=_cfg_int('MOMENTS_QUERY_LIMIT', 5))
+                except Exception as e:
+                    logger.error(f"查询朋友圈互动失败: {e}")
+                    items = []
+                if not items:
+                    reply_text = '没读到朋友圈互动记录（还没有人赞/评论你的动态，或本地库还没同步）。'
+                else:
+                    lines = []
+                    for it in items:
+                        when = time.strftime(
+                            '%m-%d %H:%M', time.localtime(it.get('create_time') or 0))
+                        who = it.get('from_nickname') or it.get('from_username') or '有人'
+                        body = (it.get('content') or '').strip()
+                        if it.get('type') == 2:
+                            action = f"评论：{body}" if body else '评论了你的动态'
+                        else:
+                            action = '赞了你的动态'
+                        unread = '（未读）' if it.get('unread') else ''
+                        lines.append(f"{when} {who} {action}{unread}")
+                    reply_text = '最近的朋友圈互动：\n' + '\n'.join(lines)
+            send_reply(user_id, user_id, user_id, command_label, reply_text, is_system_message=True)
+            return True
+
+        if cmd_name in ('/朋友圈', '/pyq'):
+            command_label = '[命令]' + cmd_name
+            if not get_dynamic_config('ENABLE_MOMENTS_COMMAND', True):
+                reply_text = '朋友圈查询指令已关闭（配置项 ENABLE_MOMENTS_COMMAND）。'
+                send_reply(user_id, user_id, user_id, command_label, reply_text, is_system_message=True)
+                return True
+            # 参数：纯数字 = 条数；其它 = 要看谁的动态（昵称/备注）
+            limit = max(1, _cfg_int('MOMENTS_QUERY_LIMIT', 5))
+            target = sender_wxid or user_id
+            target_label = '本人'
+            if cmd_arg.isdigit():
+                limit = max(1, min(50, int(cmd_arg)))
+            elif cmd_arg:
+                target = cmd_arg
+                target_label = cmd_arg
+            try:
+                feeds = wx.GetMoments(who=target, limit=limit)
+            except Exception as e:
+                logger.error(f"查询朋友圈失败: {e}")
+                feeds = []
+            if not feeds:
+                reply_text = f'没读到 {target_label} 的动态（可能没发过，或朋友圈数据还没同步到本地库）。'
+            else:
+                lines = []
+                for feed in feeds:
+                    ts = feed.get('create_time') or 0
+                    when = time.strftime('%m-%d %H:%M', time.localtime(int(ts))) if ts else '时间未知'
+                    text = (feed.get('text') or '').strip().replace('\n', ' ') or '（无正文）'
+                    extra = []
+                    for key, label in (('images', '图'), ('videos', '视频'),
+                                       ('likes', '赞'), ('comments', '评论')):
+                        if feed.get(key):
+                            extra.append(f"{len(feed[key])}{label}")
+                    suffix = f"（{'/'.join(extra)}）" if extra else ''
+                    lines.append(f"{when} {text[:100]}{suffix}")
+                reply_text = f'{target_label} 最近 {len(feeds)} 条朋友圈：\n' + '\n'.join(lines)
+            send_reply(user_id, user_id, user_id, command_label, reply_text, is_system_message=True)
+            return True
+
         if normalized == '/总结' or normalized == '/ms':
             try:
                 # 立即进行一次临时记忆总结，无论ENABLE_MEMORY是否启用
@@ -1820,7 +2339,8 @@ def handle_wxauto_message(msg, who):
 
         # 文本指令优先处理（如/重启、/清除临时记忆等）
         try:
-            if _handle_text_command_if_any(original_content, username):
+            if _handle_text_command_if_any(original_content, username,
+                                           getattr(msg, 'sender_wxid', None)):
                 return
         except Exception as e:
             logger.error(f"指令解析失败: {e}")
@@ -1908,9 +2428,13 @@ def handle_wxauto_message(msg, who):
         if img_path:
             logger.info(f"开始识别图片/表情 - 用户 {username}: {img_path}")
             # 调用识别函数
-            recognized_text = recognize_image_with_moonshot(img_path, is_emoji=is_emoji)
+            recognized_text = recognize_image(img_path, is_emoji=is_emoji)
             # 使用识别结果或回退占位符更新 processed_content
             processed_content = recognized_text if recognized_text else ("[图片]" if not is_emoji else "[动画表情]")
+            # 群聊里图片/表情的发送者会被上面的识别结果覆盖掉，这里补回来。
+            # wechatauto 1.2.4.1 起这类消息也能解析出真名（旧版只有个数字，所以当初排除了）。
+            if is_user_group_chat(who) and msg.sender and not str(msg.sender).isdigit():
+                processed_content = f"[群聊消息-发送者:{msg.sender}] {processed_content}"
             can_send_messages = True # 确保识别后可以发送消息
             logger.info(f"图片/表情识别完成，结果: {processed_content}")
 
@@ -1921,6 +2445,14 @@ def handle_wxauto_message(msg, who):
             # 使用正则表达式查找 URL
             url_pattern = r'https?://[^\s<>"]+|www\.[^\s<>"]+'
             urls_found = re.findall(url_pattern, original_content) # 仍在原始消息中查找URL
+
+            # 微信客户端自己的资源地址（表情/卡片 CDN、更新包、错误占位页）不是网页，
+            # 抓它只会得到「非 HTML / 提取不到文本」。实测这种地址在正文里出现过 462 次。
+            asset_urls = [u for u in urls_found if is_wechat_asset_url(u)]
+            if asset_urls:
+                urls_found = [u for u in urls_found if not is_wechat_asset_url(u)]
+                logger.info(f"已忽略 {len(asset_urls)} 个微信资源地址（不是网页链接）："
+                            f"{asset_urls[0][:70]}")
 
             if urls_found:
                 # 优先处理第一个找到的有效链接
@@ -1938,6 +2470,14 @@ def handle_wxauto_message(msg, who):
                     logger.warning(f"未能从链接 {url_to_fetch} 提取有效文本内容。将按原始消息处理。")
                     # 如果抓取失败，processed_content 保持不变（可能是原始文本，或图片/表情占位符）
             # else: (如果没找到URL) 不需要操作，继续使用当前的 processed_content
+
+        # --- 3.5 朋友圈监听攒下的新动态（ENABLE_MOMENTS_WATCH）---
+        moment_note_list = _take_moment_notes(username)
+        if moment_note_list:
+            note_prefix = "；".join(moment_note_list)
+            processed_content = (f"{note_prefix}\n{processed_content}"
+                                 if processed_content else note_prefix)
+            logger.info(f"注入朋友圈动态提示 -> {username}: {len(moment_note_list)} 条")
 
         # --- 4. 记录用户消息到记忆 (如果启用) ---
         log_user_message_to_memory(username, processed_content)
@@ -2121,7 +2661,11 @@ def send_reply(user_id, sender_name, username, original_merged_message, reply, i
         reply = remove_timestamps(reply)
         if REMOVE_PARENTHESES:
             reply = remove_parentheses_and_content(reply)
-        parts = split_message_with_context(reply)
+        raw_parts = split_message_with_context(reply)
+        parts = dedupe_repeated_parts(raw_parts)
+        if len(parts) != len(raw_parts):
+            logger.warning(f"回复里有 {len(raw_parts) - len(parts)} 段相邻重复内容，"
+                           f"已去掉（用户 {user_id}）")
 
         if not parts:
             logger.warning(f"回复消息在分割/清理后为空，无法发送给 {user_id}。")
@@ -3593,11 +4137,11 @@ def log_ai_reply_to_memory(username, reply_part):
     """将 AI 的回复部分记录到用户的记忆日志文件中。"""
     if not ENABLE_MEMORY:  # 双重检查是否意外调用
          return
-    # === virtual-life 记忆桥接：AI 回复也入检索式记忆库 ===
+    # === virtual-life 记忆桥接：AI 回复也入检索式记忆库（失败静默） ===
     try:
         from vl_memory_bridge import remember as vl_remember
-        prompt_name = prompt_mapping.get(username, username)
-        vl_remember(username, f"AI（{prompt_name}）回复：{reply_part}", kind="chat",
+        _pn = prompt_mapping.get(username, username)
+        vl_remember(username, f"AI（{_pn}）回复：{reply_part}", kind="chat",
                     importance=4.0, key=1)
     except Exception:
         pass
@@ -3865,24 +4409,9 @@ def needs_online_search(message: str, user_id: str) -> Optional[str]:
     if not ENABLE_ONLINE_API:  # 如果全局禁用，直接返回 None
         return None
 
-    # 关键词预筛：检测这一步要过一次大模型（本机实测 8.7-20.4 秒，服务端 --parallel 1 还会排队），
-    # 不过筛就是每条闲聊都先付这个钱。词表在 config 的 ONLINE_PREFILTER_WORDS，可自行加词。
-    # 模块导入失败时选择"放行去做检测"而不是静默跳过，免得哪天 websearch.py 丢了变成默默失灵。
-    if ENABLE_ONLINE_PREFILTER:
-        try:
-            from websearch import likely_needs_web
-            hit = likely_needs_web(message, ONLINE_PREFILTER_WORDS)
-        except Exception as e:
-            logger.warning(f"联网预筛模块不可用，按需要检测处理: {e}")
-            hit = True
-        if not hit:
-            logger.debug(f"联网预筛未命中关键词，跳过检测（用户 {user_id}）: '{message[:30]}'")
-            return None
-
     # 构建用于检测的提示词
     detection_prompt = f"""
 请判断以下用户消息是否明确需要查询当前、实时或非常具体的外部信息（例如：{SEARCH_DETECTION_PROMPT}）。
-当前时间：{datetime.now().strftime('%Y-%m-%d')}。如果要给出搜索词，年份和"最近/今天"这类相对时间一律以此为准，不要凭记忆。
 用户消息："{message}"
 
 如果需要联网搜索，请回答 "需要联网"，并在下一行提供你认为需要搜索的内容，此内容包含修饰语，不缺失主干，意思明确，保证搜索后的内容准确。
@@ -3924,44 +4453,67 @@ def needs_online_search(message: str, user_id: str) -> Optional[str]:
         logger.error(f"联网检测失败，用户: {user_id}，错误: {e}", exc_info=True)
         return None  # 出错时默认不需要联网
 
-# --- 取证层：抓外部材料，不作答 ---
+# --- 调用在线模型的函数 ---
 def get_online_model_response(query: str, user_id: str) -> Optional[str]:
     """
-    只做第 2 步「取证」：把外部搜索结果抓成材料文本返回，作答仍由调用方交给主模型
-    （见 2010-2028 行的 final_prompt）。
+    使用配置的在线 API 获取搜索结果。
 
-    为什么不再调用 online_client：原先这里是把问题发给一个"自己会搜"的远程模型
-    （deepseek-r1-searching）并直接返回它的答案。主模型换成本地以后这个形状是错的——
-    本机 llama-server 没有搜索工具，问它"请在互联网上查找"只会得到自信的编造。
-    搜索源是本机免 key 实测可达的：cn.bing.com（0.25-0.29s）与 wttr.in（天气）。
+    参数:
+        query (str): 要发送给在线模型的查询（通常是用户消息）。
+        user_id (str): 用户标识符 (用于日志)。
 
     返回:
-        Optional[str]: 抓到的材料；抓不到返回 None。
-        注意这里不再返回"抱歉，出错了"那种句子——老代码把错误文案也当参考信息喂给主模型，
-        主模型会照着道歉或补内容；返回 None 时调用方本来就有回退到常规回复的分支（2030 行）。
+        Optional[str]: 在线 API 的回复内容，如果失败则返回 None。
     """
-    try:
-        from websearch import gather_materials
-    except Exception as e:
-        logger.error(f"取证模块 websearch 导入失败，用户: {user_id}: {e}", exc_info=True)
+    if not online_client: # 检查在线客户端是否已成功初始化
+        logger.error(f"在线 API 客户端未初始化，无法为用户 {user_id} 执行在线搜索。")
         return None
 
+    # 获取当前时间并格式化为字符串
+    current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 结合固定的提示词、当前时间和用户查询
+    online_query_prompt = f"请在互联网上查找相关信息，忽略过时信息，并给出简要的回答。\n{ONLINE_FIXED_PROMPT}\n当前时间：{current_time_str}\n\n{query}"
+
     try:
-        logger.info(f"联网取证 - 用户: {user_id}, 查询: '{query[:100]}...'")
-        materials, meta = gather_materials(
-            query, n=ONLINE_SEARCH_TOP_N, max_chars=MAX_WEB_CONTENT_LENGTH,
-            timeout=REQUESTS_TIMEOUT)
-        if not materials:
-            logger.warning(f"联网取证未抓到结果，用户: {user_id}，按常规流程回复。详情: {meta}")
+        logger.info(f"调用在线 API - 用户: {user_id}, 查询: '{query[:100]}...'")
+        # 使用 online_client 调用在线模型
+        response = online_client.chat.completions.create(
+            model=ONLINE_MODEL,
+            messages=[{"role": "user", "content": online_query_prompt}],
+            temperature=ONLINE_API_TEMPERATURE,
+            max_tokens=ONLINE_API_MAX_TOKEN,
+            stream=False
+        )
+
+        if not response.choices:
+            logger.error(f"在线 API 返回了空的选择项，用户: {user_id}")
             return None
-        logger.info(f"联网取证完成 (用户 {user_id}): 引擎={meta.get('engine')} "
-                    f"条数={meta.get('hits')} 耗时={meta.get('seconds')}s")
-        # 当前时间仍然带上：材料里的"5 小时之前"这类相对时间需要它才能解释
-        current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        return ("%s\n抓取时间：%s\n来源引擎：%s"
-                % (materials, current_time_str, meta.get("engine")))
+
+        # 检查在线API是否返回了空的消息内容
+        message_content = response.choices[0].message.content
+        if message_content is None:
+            logger.error(f"在线API返回了空的信息，可能是因为触发了安全检查机制，请修改Prompt并清空上下文再试 (用户: {user_id})")
+            return None
+
+        reply = message_content.strip()
+        # 清理回复，去除思考过程
+        if "</think>" in reply:
+            reply = reply.split("</think>", 1)[1].strip()
+        logger.info(f"在线 API 响应 (用户 {user_id}): {reply}")
+        return reply
+
     except Exception as e:
-        logger.error(f"联网取证失败，用户: {user_id}: {e}", exc_info=True)
+        msg = str(e)
+        low = msg.lower()
+        if any(k in low for k in ("401", "402", "invalid token", "insufficient",
+                                  "quota", "balance")) or "余额" in msg:
+            # 这类错误以前也回一句「抱歉，在线搜索功能暂时出错了。」，而那句话会被当成
+            # 「搜索到的参考信息」塞进主模型的提示词里，看起来就像"联网结果经常是空的"。
+            logger.error(f"联网搜索被跳过：在线 API 拒绝了凭据（{msg[:140]}）。"
+                         f"多半是 {ONLINE_BASE_URL} 的 Key 欠费或过期，"
+                         f"充值/换 Key 后重启机器人才恢复。")
+        else:
+            logger.error(f"调用在线 API 失败，用户: {user_id}: {e}", exc_info=True)
         return None
 
 def monitor_memory_usage():
@@ -4223,6 +4775,23 @@ def main():
 
         # 预检查所有用户prompt文件
         for user in user_names:
+            # 开了「读聊天记录」并且档案已经生成：不再需要 prompt 文件
+            if user in history_users() and get_history_profile(user):
+                prof_path = get_history_profile_path(user)
+                try:
+                    size = os.path.getsize(prof_path)
+                except OSError:
+                    size = 0
+                logger.info(f"用户 {user} 人设来源：聊天记录风格档案"
+                            f"（{size} 字，{os.path.relpath(prof_path, root_dir)}，"
+                            f"生成于 {time.strftime('%m-%d %H:%M', time.localtime(get_history_profile_info(user))) if get_history_profile_info(user) else '未知时间'}）")
+                continue
+            # 档案文件在、名字却不在名单里：以前这里是静默回落 prompt，用户只会觉得
+            # 「导入了聊天记录怎么还用 prompt」，所以点名说清楚。
+            if user not in history_users() and os.path.exists(get_history_profile_path(user)):
+                logger.warning(f"用户 {user} 有风格档案文件，但 HISTORY_STYLE_USERS 里没有这个名字，"
+                               f"本次仍用 prompt 文件「{prompt_mapping.get(user, user)}」。"
+                               f"要用档案请在配置页勾选该用户的「读聊天记录」并保存配置。")
             prompt_file = prompt_mapping.get(user, user)
             prompt_path = os.path.join(root_dir, 'prompts', f'{prompt_file}.md')
             if not os.path.exists(prompt_path):
@@ -4270,6 +4839,43 @@ def main():
                 logger.error(f"\033[31m添加监听用户{user_name}失败，请确保您在用户列表填写的微信昵称/备注与实际完全匹配，并且不要包含表情符号和特殊符号，注意填写的不是自己登录的微信昵称!\033[0m")
                 exit(1)
         logger.info("监听用户添加完成")
+
+        # 挂上防撤回（镜像 + 媒体备份，纯读库、只写自己的镜像目录，不驱动界面）
+        # 默认值写在这里而不是引用全局：老用户的 config.py 里没有这些新键，
+        # 直接引用会在启动时 NameError。
+        recall_on = get_dynamic_config('ENABLE_RECALL_GUARD', True)
+        if recall_on:
+            started = wx.StartRecallGuard(
+                backfill=_cfg_int('RECALL_BACKFILL', 50),
+                scan_interval=_cfg_float('RECALL_SCAN_INTERVAL', 2.0),
+                scan_limit=_cfg_int('RECALL_SCAN_LIMIT', 30))
+            if started:
+                logger.info("防撤回已启用（/撤回 查看原文，/撤回统计 看谁最常撤回）")
+            else:
+                logger.warning("防撤回启用失败，/撤回 将没有记录。")
+        else:
+            logger.info("防撤回已禁用 (ENABLE_RECALL_GUARD = False)。")
+
+        if recall_on and get_dynamic_config('ENABLE_RECALL_NOTICE', False):
+            recall_notice_thread = threading.Thread(target=recall_notice_loop, name="RecallNotice")
+            recall_notice_thread.daemon = True
+            recall_notice_thread.start()
+            logger.info("撤回提醒已启用（发现新的撤回时会主动发一条提醒）。")
+
+        if get_dynamic_config('ENABLE_CONTEXT_FETCH', False):
+            logger.info("正在预读聊天记录背景...")
+            try:
+                preload_history_contexts()
+            except Exception as e:
+                logger.error(f"预读聊天记录失败: {e}", exc_info=True)
+        else:
+            logger.info("聊天记录上下文按需读取已禁用 (ENABLE_CONTEXT_FETCH = False)。")
+
+        if get_dynamic_config('ENABLE_MOMENTS_WATCH', False):
+            moment_watch_thread = threading.Thread(target=moment_watch_loop, name="MomentWatch")
+            moment_watch_thread.daemon = True
+            moment_watch_thread.start()
+            logger.info("朋友圈监听已启用（监听对象发新动态时会在聊天里告知）。")
         
         # 初始化所有用户的自动消息计时器 - 总是初始化，以便功能开启时立即可用
         logger.info("正在加载用户自动消息计时器状态...")
